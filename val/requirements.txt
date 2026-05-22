@@ -1,0 +1,29 @@
+# Core
+numpy>=1.24
+opencv-python-headless>=4.8
+pyyaml>=6.0
+keyboard>=0.13
+
+# Screen Capture (single_pc)
+bettercam>=1.0
+mss>=9.0
+
+# Hardware Input — serial devices (MAKCU, KmBox B+)
+pyserial>=3.5
+
+# AI Inference (AMD GPU via DirectML)
+ultralytics>=8.4
+onnxruntime-directml>=1.24
+onnx>=1.12,<2.0
+torch>=2.0
+
+# GUI (ImGui + GLFW/OpenGL3)
+# imgui-bundle works on Python 3.13+ (pre-built wheels)
+# imgui[glfw] works on Python ≤3.12 (requires C++ compilation)
+imgui-bundle>=1.5.0
+glfw>=2.6
+PyOpenGL>=3.1
+
+# Testing
+pytest>=7.0
+pytest-cov>=4.0

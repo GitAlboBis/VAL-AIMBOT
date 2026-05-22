@@ -1,0 +1,56 @@
+# Valorant Offsets — Patch 12.08 (30 April 2026)
+# Source: reversaloffset (SDK dump, 383 lines) — PRIMARY SOURCE OF TRUTH
+# WARNING: These change EVERY patch. Validate after each game update.
+
+globals:
+  gworld: 0xC19AFA0
+  uworld_state: 0xC19A0C0
+  gobjects: 0xC147A80
+  fnamepool: 0xC34B800
+  fnamestate: 0xC536280
+  fnamekey: 0x40
+
+read_chain:
+  game_instance: 0x1D8
+  persistent_level: 0x38
+  game_state: 0x178
+  local_players: 0x40
+  player_controller: 0x38
+  acknowledged_pawn: 0x510
+  player_state: 0x480
+  camera_manager: 0x520
+  control_rotation: 0x4E0
+  camera_cache: 0x20A0
+  actor_array: 0xA0
+  actor_count: 0xA8
+
+actor:
+  actor_id: 0x18
+  mesh: 0x4E8
+  root_component: 0x288
+  damage_handler: 0xC68
+  dormant: 0x21D
+  bounds_scale: 0x47C
+
+mesh:
+  component_to_world: 0x2D0
+  bone_array: 0xB08
+  bone_count: 0xB10
+  velocity: 0x1B8
+
+combat:
+  health: 0x200
+  b_alive: 0x1F9
+  team_component: 0x6A0
+  team_id: 0xE8
+  shield_life: 0x220
+
+functions:
+  process_event: 0x1BB8140
+  bone_matrix: 0x410E150
+  set_outline_mode: 0x40A1420
+
+# XOR decryption constants (Patch 12.08)
+xor:
+  magic: 0x2545F4914F6CDD1D
+  state_count: 7

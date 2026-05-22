@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+_qnn.log
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+.kiro/
+.hypothesis/
+.pytest_cache/

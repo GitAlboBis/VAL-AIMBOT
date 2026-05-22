@@ -1,0 +1,57 @@
+ai_engine:
+  capture_size: 416
+  confidence: 0.35
+  enabled: true
+  execution_provider: auto
+  headshot_bias: 0.35
+  iou_threshold: 0.45
+  model_path: ./models/yolov8m-valorant-detection.onnx
+  target_classes:
+  - 1
+aim:
+  cooldown_ms: 7
+  deadzone_px: 2.0
+  enable: true
+  fov_radius_px: 80.0
+  legacy_pixel_to_count: 0.85
+  pre_multiplier_x: 1.0
+  pre_multiplier_y: 1.0
+  trace_algorithm: 2
+  trace_delay_ms: 80
+  cx_counts_per_2pi: 1637.02
+  lock_radius_px: 120.0
+  lock_timeout_s: 0.20
+  ema_alpha: 0.40
+  disable_prediction: true
+  prediction_interval: 1.0
+  min_speed_multiplier: 0.8
+  max_speed_multiplier: 1.5
+  ads_multiplier: 0.4
+capture:
+  backend: capture_card
+  chipset_preset: ms2130
+  device_index: 0
+  fourcc: YUY2
+  fps_cap: 60
+  monitor: 0
+  resolution_height: 1080
+  resolution_width: 1920
+general:
+  activation_key: caps_lock
+  architecture: dual_pc
+  log_file: errors.log
+  log_level: WARNING
+  mode: aimbot
+  overlay: false
+  panic_key: f10
+  primary_engine: ai
+input:
+  driver: kmbox_net
+  kmbox_net:
+    ip: 192.168.2.188
+    port: '41990'
+    use_encryption: true
+    uuid: B6860C3D
+rapid_fire:
+  enabled: false
+  target_cps: 10
