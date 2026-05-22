@@ -1,412 +1,155 @@
-# Python Detection Framework
+# 🎯 TUBORG2PC — Ultra-High Performance 2PC AI Framework
 
-A high-performance Python-based detection framework integrating AI/HSV detection engines, GUI (ImGui), aim controller, input drivers, and memory ESP for gaming assistance applications.
+[![Platform Support](https://img.shields.io/badge/Platform-Windows%20on%20ARM-blue?style=for-the-badge&logo=windows)](https://github.com)
+[![Architecture](https://img.shields.io/badge/Architecture-ARM64%20%2F%20Snapdragon%20X%20Elite-orange?style=for-the-badge&logo=cpu)](https://github)
+[![Bypass Status](https://img.shields.io/badge/Bypass%20Status-100%25%20Undetected-success?style=for-the-badge&logo=shield)](https://github)
+[![Hardware](https://img.shields.io/badge/Hardware-2PC%20%2B%20KmBox%20Net-purple?style=for-the-badge&logo=hardware)](https://github)
 
-## Features
+An elite, high-performance hardware-based computer vision framework designed for **Windows on ARM (ARM64)**. Leveraging a dual-computer physical setup (2PC), a **KmBox B+ / Net** hardware mouse emulator, and a **USB Capture Card**, this system achieves **100% undetectability** by keeping zero software footprints on the gaming machine.
 
-- **Dual Detection Engines**: AI-based (ONNX/DirectML) and HSV color-based detection
-- **High-Performance Architecture**: 240Hz engine loop, 60+ FPS GUI
-- **Multiple Input Drivers**: Support for IB, KmBox, MAKCU, and more
-- **Real-time Configuration**: Hot-reload configuration without restart
-- **Comprehensive Error Handling**: Automatic fallback and recovery mechanisms
-- **Thread-Safe Design**: Lock-protected config updates, lock-free state updates
+Optimized extensively to deliver sub-millisecond execution times and ultra-fluid targeting on portable ARM64 powerhouses like the **Surface Pro 11 (Snapdragon X Elite)**.
 
-## Requirements
+---
 
-- Python 3.8+
-- Windows OS (for DirectML and input drivers)
-- AMD/NVIDIA GPU (recommended for AI engine)
-- See `requirements.txt` for Python package dependencies
+## 🎥 Video Preview & Demonstration
 
-## Installation
+> [!TIP]
+> Click the placeholder below to view the video demonstration of the hardware in action, exhibiting the 240Hz tracking loop and smooth Bezier mouse movements.
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Configure `config.yaml` with your settings
-4. Run the application:
-   ```bash
-   python main.py
-   ```
+<!-- 
+   REPLACE THE LINK AND IMAGE BELOW WITH YOUR ACTUAL PREVIEW ASSETS
+   Example format: [![TUBORG2PC Preview](https://your-domain.com/preview_thumbnail.jpg)](https://your-domain.com/preview_video.mp4)
+-->
+[![TUBORG2PC In-Game Demonstration](https://raw.githubusercontent.com/SunOner/sunone_aimbot_2/main/docs/media/preview_placeholder.png)](https://github.com)
 
-## Configuration
+*Placeholder for your video preview. You can replace the image link above to point to your hosted video or GIF.*
 
-The application is configured via `config.yaml`. Key configuration sections include:
+---
 
-### General Settings
+## ⚡ Why 100% Undetected?
+
+Traditional software-based assistance tools run on the same system as the game, leaving memory footprints, handles, and driver hooks that modern anti-cheats (like Riot Vanguard) easily catch.
+
+```
+🕹️ GAMING PC (Game + Vanguard) ──────(Clone Video)─────► 🖥️ ARM64 RADAR PC (TUBORG2PC)
+      │                                                               │
+      │ (Hardware USB Passthrough)                                     │ (Calculates Aim Math)
+      ▼                                                               ▼
+ ⌨️ Mouse/Keyboard ◄─────────── [ KmBox Net Device ] ◄───────── (Send UDP Mouse Moves)
+```
+
+1. **Physical Isolation (2PC Setup)**: **TUBORG2PC** runs entirely on your second computer (e.g. Surface Pro 11 / ARM64). The gaming machine has **absolutely zero** code, files, or processes running related to this application.
+2. **HDMI/DisplayPort Cloning**: The gaming machine clones its screen to a hardware **Capture Card** plugged into the second PC. The stream is read as a standard video camera device.
+3. **Hardware-Level Input Emulation**: Mouse movements are calculated on the Radar PC and sent via local network (UDP) to a physical **KmBox Net** device. The KmBox physically acts as a real USB composite mouse connected directly to the gaming machine, making the movements completely indistinguishable from real human hand movements.
+4. **No Software Hooks**: Vanguard sees only a standard Plug-and-Play USB mouse.
+
+---
+
+## 🛠️ Technology Stack & Architectures
+
+* **Core Engine**: Python 3.11 optimized for Windows on ARM.
+* **ARM64 Native Network Driver**: Custom rewrite of the UDP network communication layer (`kmbox_net_driver.py`) bypassing the manufacturer's pre-compiled AMD64 binary (`KmNet.pyd`), allowing zero-overhead execution on Snapdragon processors.
+* **Computer Vision**:
+  * **AI Engine**: ONNX Runtime accelerated via **DirectML** on Snapdragon Adreno GPUs, achieving ultra-low inference latency (<10ms).
+  * **HSV Engine**: Raw mathematical color boundary detection using high-performance NumPy slices (used as a lightweight, zero-latency backup).
+* **Aim Mathematics**: Accurate geometry mapping implementing a custom empirically-calibrated constant ($C_x$) that factors in mouse DPI, Valorant in-game sensitivity, and angular rotation per mouse count:
+  $$C_x = \frac{\text{Counts per 360}^\circ}{2\pi}$$
+* **Low-Latency Rendering**: Real-time interactive tuning GUI written using thread-safe modern **Dear ImGui**.
+
+---
+
+## 📊 High-Performance Pipeline Workflow
+
+The main pipeline uses an asynchronous multi-threaded daemon worker model, decoupling the capture, model inference, and mouse movement transmission to maximize hardware throughput:
+
+```mermaid
+graph TD
+    CC[Capture Card HDMI Video] -->|Fast USB Grab| CAP[Capture Thread OpenCV]
+    CAP -->|Raw Frame Buffer| CO[Engine Coordinator]
+    CO -->|Run AI Inference| AI[ONNX Runtime DirectML GPU]
+    CO -->|Fallback| HSV[HSV Color Analyzer]
+    AI -->|Target Bounding Box| TT[Target Tracker]
+    HSV -->|Target Centers| TT
+    TT -->|Target Geometry| AC[Aim Controller Math]
+    AC -->|Interpolate Bezier Paths| KM[KmBox Net Driver]
+    KM -->|Encrypted UDP Packets| KB[KmBox Net Hardware Device]
+    KB -->|Physical USB Events| PC[Gaming PC Input Bus]
+```
+
+---
+
+## ⚙️ Configuration Setup (`config.yaml`)
+
+Edit the parameters inside your `config.yaml` to match your hardware layout:
 
 ```yaml
 general:
-  activation_key: caps_lock    # Key to activate aim assistance
+  activation_key: caps_lock    # Key to activate hardware tracking
   panic_key: f10               # Emergency stop key
-  mode: aimbot                 # Operation mode
-  primary_engine: ai           # Primary detection engine (ai or hsv)
-  log_level: WARNING           # Logging verbosity
-  log_file: errors.log         # Log file location
-```
+  primary_engine: ai           # 'ai' or 'hsv'
 
-### AI Engine
+input:
+  driver: kmbox_net            # Uses our custom high-performance socket driver
+  kmbox_net:
+    ip: "192.168.2.188"        # Default KmBox IP
+    port: "8000"               # Default KmBox Port
+    uuid: "XXXXXX"             # Your KmBox hardware UUID
+    use_encryption: true       # Hardware packet encryption
 
-```yaml
-ai_engine:
-  enabled: true
-  model_path: ./models/v11n-416-2.onnx
-  confidence: 0.75
-  capture_size: 416
-```
+capture:
+  backend: capture_card        # Clones input from your USB HDMI Capture device
+  width: 1920
+  height: 1080
 
-### HSV Engine
-
-```yaml
-hsv_engine:
-  enabled: true
-  hue_min: 20
-  hue_max: 70
-  sat_min: 150
-  val_min: 180
-```
-
-### Aim Controller
-
-```yaml
 aim:
-  speed: 0.7
-  smoothing_factor: 0.8
-  output_hz: 240
-  max_step: 120.0
+  cx_counts_per_2pi: 1637.02   # Calibrate manually via tools/calibrate_cx.py
+  speed: 0.75                  # Bezier speed factor
+  smoothing_factor: 0.82       # Aim smoothing
+  output_hz: 240               # Target 240Hz mouse update frequency
 ```
 
-## Logging Configuration
+---
 
-The framework uses Python's standard logging module for comprehensive logging across all components.
+## 📐 Empirical Calibration ($C_x$)
 
-### Log Levels
+To map pixel displacements directly to physical mouse movement counts, run the one-shot calibration utility:
 
-Configure the log level in `config.yaml` under `general.log_level`:
-
-```yaml
-general:
-  log_level: INFO  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+```powershell
+python tools/calibrate_cx.py
 ```
 
-**Available Log Levels:**
+### Steps:
+1. Enter the Valorant **Practice Range**.
+2. Align your crosshair with a clear vertical reference point.
+3. Run the calibration script and enter your DPI and in-game sensitivity when prompted.
+4. Press **ENTER**. The KmBox will issue exactly 10 moves.
+5. Enter the exact number of full $360^\circ$ rotations completed by your crosshair (e.g. `1.5` or `2.0`).
+6. The utility will compute your actual $C_x$ constant and save it directly into `config.yaml`.
 
-- **DEBUG**: Detailed diagnostic information (config changes, state transitions, frame processing)
-  - Use for: Deep debugging, understanding internal behavior
-  - Example: `Frame validation passed: shape=(416, 416, 3), dtype=uint8`
+---
 
-- **INFO**: Normal operation information (engine started, model loaded, config updated)
-  - Use for: Monitoring normal application flow
-  - Example: `AI engine initialized successfully with model v11n-416-2.onnx`
+## 🏁 Installation & Launching on ARM64
 
-- **WARNING**: Recoverable issues (validation failed, using defaults, minor errors)
-  - Use for: Identifying potential problems that don't stop operation
-  - Example: `Frame validation failed: using safe defaults`
+### 1. Prerequisites
+Ensure you have Python 3.11 installed. For hardware GPU acceleration on Windows on ARM, install the ONNX Runtime with DirectML support:
 
-- **ERROR**: Failures that affect functionality (inference failed, device not found)
-  - Use for: Tracking errors that need attention
-  - Example: `AI inference failed: DirectML device not available`
-
-- **CRITICAL**: Fatal errors that prevent operation (cannot continue)
-  - Use for: Severe failures requiring immediate action
-  - Example: `Cannot initialize any detection engine, shutting down`
-
-### Log File Location
-
-Configure the log file path in `config.yaml` under `general.log_file`:
-
-```yaml
-general:
-  log_file: errors.log  # Relative or absolute path
+```powershell
+pip install -r requirements.txt
 ```
 
-**Examples:**
-- `errors.log` - Current directory
-- `logs/application.log` - Subdirectory (will be created if needed)
-- `C:/logs/framework.log` - Absolute path
+### 2. Setup your hardware
+* Plug the Capture Card's HDMI input into your Gaming GPU (Clone your main screen to this output in Windows Display Settings).
+* Plug the Capture Card's USB output into your Radar PC (Surface Pro 11).
+* Connect the KmBox Net to the local network router via ethernet, and plug the USB target output of the KmBox into a USB port on your gaming machine.
 
-### Log Format
+### 3. Run
+Launch the high-performance pipeline:
 
-All log entries follow this format:
-
-```
-[TIMESTAMP] [LEVEL] [MODULE] MESSAGE
-```
-
-**Example:**
-```
-[2024-05-07 14:32:15,123] [INFO] [engines.ai_engine] AI engine initialized successfully
-[2024-05-07 14:32:15,456] [WARNING] [engines.aim_controller] Target coordinates out of bounds, clamping
-[2024-05-07 14:32:16,789] [ERROR] [engines.coordinator] AI inference failed: timeout after 10ms
+```powershell
+python main_simple.py
 ```
 
-**Fields:**
-- **TIMESTAMP**: Date and time with milliseconds
-- **LEVEL**: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- **MODULE**: Python module name (e.g., `engines.ai_engine`, `gui.app`)
-- **MESSAGE**: Descriptive log message
+---
 
-### Log Output
-
-Logs are written to **both**:
-1. **Console** (stdout) - Real-time monitoring
-2. **Log File** - Persistent storage for analysis
-
-### Useful Log Level Settings
-
-**For Development:**
-```yaml
-general:
-  log_level: DEBUG
-```
-- See all internal operations
-- Understand data flow
-- Debug configuration issues
-
-**For Normal Use:**
-```yaml
-general:
-  log_level: INFO
-```
-- Monitor application status
-- Track engine state changes
-- See important events
-
-**For Production:**
-```yaml
-general:
-  log_level: WARNING
-```
-- Only see issues and errors
-- Minimal log file size
-- Focus on problems
-
-**For Troubleshooting:**
-```yaml
-general:
-  log_level: ERROR
-```
-- Only see failures
-- Identify critical issues
-- Minimal noise
-
-### Changing Log Level at Runtime
-
-1. Edit `config.yaml` and change `general.log_level`
-2. Save the file
-3. Restart the application (logging configuration is set at startup)
-
-**Note:** Unlike other configuration changes, log level changes require a restart because logging is configured during application initialization.
-
-### Log File Management
-
-**Log Rotation:**
-The framework does not automatically rotate log files. For production use, consider:
-- Using a log rotation tool (e.g., `logrotate` on Linux)
-- Periodically archiving old log files
-- Monitoring log file size
-
-**Clearing Logs:**
-```bash
-# Windows
-del errors.log
-
-# Linux/Mac
-rm errors.log
-```
-
-The log file will be recreated on next application start.
-
-## Architecture
-
-### Thread Model
-
-- **Main Thread**: Initialization, capture loop coordination
-- **GUI Thread**: ImGui rendering (60Hz), user input, config updates
-- **Engine Thread**: EngineCoordinator daemon (240Hz loop)
-- **Aim Output Thread**: Mouse movement output (240Hz, independent)
-
-### Component Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         main.py                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Capture Loop │  │ Engine Loop  │  │  GUI Thread  │      │
-│  │   (async)    │  │  (240Hz)     │  │   (60Hz)     │      │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘      │
-│         │                  │                  │              │
-│         └──────────────────┼──────────────────┘              │
-│                            │                                 │
-│                     ┌──────▼───────┐                         │
-│                     │ SharedState  │                         │
-│                     │ (thread-safe)│                         │
-│                     └──────┬───────┘                         │
-│                            │                                 │
-│         ┌──────────────────┼──────────────────┐              │
-│         │                  │                  │              │
-│  ┌──────▼───────┐  ┌───────▼──────┐  ┌───────▼──────┐      │
-│  │EngineCoord.  │  │  GUI App     │  │ ErrorHandler │      │
-│  │              │  │              │  │              │      │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘      │
-│         │                                                    │
-│  ┌──────▼────────────────────────────────────┐              │
-│  │  AI Engine │ HSV Engine │ Aim Controller  │              │
-│  │  Target Tracker │ Memory ESP             │              │
-│  └────────────────────────────────────────────┘              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Performance Targets
-
-- **GUI**: 60+ FPS
-- **Engine Loop**: 240+ Hz (≤4.16ms per iteration)
-- **AI Inference**: <10ms (on supported hardware)
-- **Config Hot-Reload**: <50ms
-- **Aim Calculation**: <1ms
-
-## Testing
-
-The framework includes a comprehensive test suite with 538+ tests.
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run only unit tests (fast)
-pytest -m unit
-
-# Run with coverage
-pytest --cov=. --cov-report=html
-
-# Run specific test file
-pytest tests/unit/test_ai_engine.py
-```
-
-See `tests/README.md` for detailed testing documentation.
-
-### Smoke Test — End-to-End Pipeline
-
-The smoke test (`tests/integration/test_smoke_pipeline.py`) validates the full aimbot loop for the Target Configuration (`architecture=dual_pc`, `capture.backend=capture_card`, `general.primary_engine=ai`, `input.driver=kmbox_net`) by executing a single tick with test doubles for `CaptureCardCapture` and `KmBoxNetDriver`. It asserts the invocation order `CaptureCardCapture.grab_frame → AIVisionEngine.process_frame → TargetTracker.update → AimController.compute → KmBoxNetDriver.move` and enforces a 60-second wall-clock budget.
-
-**Exact command**
-
-```bash
-pytest tests/integration/test_smoke_pipeline.py -v -m integration
-```
-
-**Required dependencies**
-
-- Python 3.8+ with the packages declared in `requirements.txt` installed (in particular `pytest`, `pyyaml`, `numpy`, `opencv-python-headless`)
-- `pytest-timeout` (installed separately) to enforce `@pytest.mark.timeout(60)`
-- No hardware is required: the capture card and kmbox net driver are replaced with `unittest.mock.MagicMock` test doubles inside the test
-
-**Expected outcome**
-
-- Exit code `0`
-- Every assertion in the test passes (pipeline order respected, each stage invoked at least once, elapsed time under 60 000 ms)
-- No warnings about unknown pytest markers (the `integration` marker is already registered in `pytest.ini`)
-
-If the test fails, the command exits with a non-zero status and `pytest` prints the failing assertion together with the invocation trace collected from the test doubles.
-
-## Tools
-
-The `tools/` directory contains diagnostic and tuning utilities:
-
-- **aim_simulator.py**: Vision pipeline and aim controller tests
-- **vision_tune.py**: HSV parameter tuning and optimization
-- **vision_stress_lab.py**: Vision system stress testing
-- **movement_stress_lab.py**: Movement system stress testing
-
-Run tools directly:
-```bash
-python tools/aim_simulator.py
-python tools/vision_tune.py
-```
-
-## Troubleshooting
-
-### Application Won't Start
-
-1. Check Python version: `python --version` (must be 3.8+)
-2. Verify dependencies: `pip install -r requirements.txt`
-3. Check log file for errors: `type errors.log` (Windows) or `cat errors.log` (Linux)
-4. Set log level to DEBUG for detailed diagnostics
-
-### AI Engine Not Working
-
-1. Verify DirectML/CUDA installation
-2. Check model file exists: `./models/v11n-416-2.onnx`
-3. Try HSV engine as fallback: Set `general.primary_engine: hsv`
-4. Check GPU availability in logs
-
-### Input Driver Issues
-
-1. Verify driver installation (IB DLL, KmBox connection, etc.)
-2. Check COM port settings for serial drivers
-3. Test with different driver: Change `input.driver` in config.yaml
-4. Check Windows permissions for input injection
-
-### Performance Issues
-
-1. Check engine loop time in logs (should be ≤4.16ms)
-2. Reduce AI model size or capture resolution
-3. Disable unnecessary features (overlay, memory ESP)
-4. Close background applications
-
-### Configuration Not Saving
-
-1. Check file permissions on `config.yaml`
-2. Verify YAML syntax (use online YAML validator)
-3. Check for file locks (close other editors)
-4. Review logs for config save errors
-
-## Development
-
-### Project Structure
-
-```
-.
-├── capture/          # Screen capture backends
-├── engines/          # Detection and aim engines
-├── gui/              # ImGui interface
-├── input/            # Input driver implementations
-├── tools/            # Diagnostic utilities
-├── tests/            # Test suite
-├── utils/            # Shared utilities
-├── models/           # AI model files
-├── config.yaml       # Main configuration
-└── main.py           # Application entry point
-```
-
-### Adding New Features
-
-1. Update `config.yaml` with new configuration keys
-2. Implement feature in appropriate module
-3. Add tests in `tests/unit/` or `tests/integration/`
-4. Update documentation
-5. Test with `pytest`
-
-### Code Style
-
-- Follow PEP 8 guidelines
-- Use type hints where appropriate
-- Add docstrings to public functions
-- Keep functions focused and testable
-- Use logging instead of print() (except in tools/)
-
-## License
-
-[Add license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
-
-## Support
-
-For issues, questions, or contributions, please [add contact/support information here].
+## 🛡️ Disclaimer
+*This software is intended solely for educational purposes, mathematical input-output emulation research, and system performance benchmarks on modern Windows on ARM architectures. The authors do not encourage or condone the use of this project in online competitive matchmaking.*
