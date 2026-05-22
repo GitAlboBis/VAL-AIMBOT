@@ -20,8 +20,8 @@ aim:
   trace_delay_ms: 80
   cx_counts_per_2pi: 1637.02
   lock_radius_px: 120.0
-  lock_timeout_s: 0.20
-  ema_alpha: 0.85
+  lock_timeout_s: 0.50
+  ema_alpha: 0.25
   disable_prediction: false
   prediction_interval: 1.0
   min_speed_multiplier: 0.8

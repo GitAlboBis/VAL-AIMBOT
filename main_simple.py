@@ -261,7 +261,7 @@ def main() -> int:
     trace_algo  = int(aim_cfg.get("trace_algorithm", 2))
     trace_delay = int(aim_cfg.get("trace_delay_ms", 80))
     deadzone_px = float(aim_cfg.get("deadzone_px", 2.0))
-    lock_radius_px = float(aim_cfg.get("lock_radius_px", 70.0))
+    lock_radius_px = float(aim_cfg.get("lock_radius_px", 100.0))
     lock_timeout_s = float(aim_cfg.get("lock_timeout_s", 0.50))
 
     # New tracking parameters (sunone-style)
@@ -346,6 +346,13 @@ def main() -> int:
     else:
         _fov_Rx = 0.0
         _fov_use_trig = False
+    # ─── Debug counters ────────────────────────────────────────────
+    _dbg_fps = 0
+    _dbg_dets = 0
+    _dbg_moves = 0
+    _dbg_aim_on = 0
+    _dbg_t0 = time.time()
+
     try:
         while True:
             if _key_down(panic_vk):
@@ -363,6 +370,11 @@ def main() -> int:
                 continue
 
             detections: List[Detection] = engine.process_frame(frame) or []
+            _dbg_fps += 1
+            if detections:
+                _dbg_dets += len(detections)
+            if aim_active:
+                _dbg_aim_on += 1
 
             # --- Selector with last_mid_coord bias (Req 2.2 / §4.1 (b))
             best: Optional[Detection] = None
@@ -508,9 +520,15 @@ def main() -> int:
                         except Exception:  # noqa: BLE001
                             pass
 
-                    # ─── Non-blocking move dispatch (sunone-style) ─
-                    mouse_worker.queue_move(mx, my)
+                    # ─── DIRECT move (bypass MouseWorker for debug) ─
+                    driver.move(mx, my)
+                    _dbg_moves += 1
 
+            # ─── Debug status print (1 Hz) ─────────────────────────
+            if time.time() - _dbg_t0 >= 1.0:
+                print(f"\r[fps={_dbg_fps:3d}  dets={_dbg_dets:3d}  aim={'ON ' if aim_active else 'OFF'}  moves={_dbg_moves:3d}  best={'YES' if best else 'NO '}]    ", end="", flush=True)
+                _dbg_fps = _dbg_dets = _dbg_moves = _dbg_aim_on = 0
+                _dbg_t0 = time.time()
 
     except KeyboardInterrupt:
         pass

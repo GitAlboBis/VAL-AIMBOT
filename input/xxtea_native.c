@@ -40,7 +40,7 @@ static inline uint32_t mx(uint32_t z, uint32_t y, uint32_t sum,
 EXPORT void xxtea_encrypt(uint32_t *v, int n, const uint32_t *k) {
     uint32_t z, y, sum = 0, e;
     int p;
-    int rounds = 6 + 52 / n;
+    int rounds = 6;  /* KmBox protocol uses fixed 6 rounds (not standard 6+52/n) */
 
     z = v[n - 1];
     while (rounds-- > 0) {
@@ -60,7 +60,7 @@ EXPORT void xxtea_encrypt(uint32_t *v, int n, const uint32_t *k) {
 EXPORT void xxtea_decrypt(uint32_t *v, int n, const uint32_t *k) {
     uint32_t z, y, sum, e;
     int p;
-    int rounds = 6 + 52 / n;
+    int rounds = 6;  /* KmBox protocol uses fixed 6 rounds (not standard 6+52/n) */
 
     sum = (uint32_t)rounds * DELTA;
     y = v[0];
