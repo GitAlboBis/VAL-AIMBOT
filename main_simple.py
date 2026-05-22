@@ -23,7 +23,7 @@ except Exception:
     pass
 
 import logging
-logging.disable(logging.CRITICAL)  # Kill ALL logging globally
+logging.basicConfig(level=logging.INFO)  # Enable info-level logging
 
 import config as cfg
 from capture import CaptureCardCapture
@@ -192,7 +192,7 @@ def main() -> int:
     parser.add_argument("--confidence", type=float, default=None,
                         help="Override ai_engine.confidence at runtime.")
     args = parser.parse_args()
-    args.silent = True  # Always silent in production
+    args.silent = False  # Logging enabled
     _ = args.toggle
 
     # ─── Load config ──────────────────────────────────────────────

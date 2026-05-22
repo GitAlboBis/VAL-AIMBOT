@@ -47,9 +47,9 @@ def build_msvc():
     src = os.path.join("input", "xxtea_native.c")
     out_dll = os.path.join("input", "xxtea_native.dll")
 
-    # Determine target architecture
-    machine = platform.machine().lower()
-    if machine in ("arm64", "aarch64"):
+    # Determine target architecture based on Python process, not OS
+    # (Python x64 can run emulated on ARM64 Windows)
+    if "ARM64" in sys.version:
         arch = "arm64"
     else:
         arch = "x64"
