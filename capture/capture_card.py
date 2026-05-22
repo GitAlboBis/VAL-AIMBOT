@@ -378,7 +378,7 @@ class CaptureCardCapture:
 
         if region:
             left, top, right, bottom = region
-            return frame[top:bottom, left:right].copy()
+            return frame[top:bottom, left:right]
 
         return frame
 
@@ -412,7 +412,7 @@ class CaptureCardCapture:
         left = max(0, cx - half)
         right = min(w, cx + half)
 
-        return frame[top:bottom, left:right].copy()
+        return frame[top:bottom, left:right]
 
     def grab_latest(self, size: int = 320) -> Optional[np.ndarray]:
         """Drop-stale variant of grab_center_region (design.md §4.3, R2.3).
@@ -440,7 +440,7 @@ class CaptureCardCapture:
         bottom = min(h, cy + half)
         left = max(0, cx - half)
         right = min(w, cx + half)
-        return frame[top:bottom, left:right].copy()
+        return frame[top:bottom, left:right]
 
     def grab_crosshair_region(self, size: int = 2) -> Optional[np.ndarray]:
         """
@@ -464,7 +464,7 @@ class CaptureCardCapture:
         left = max(0, cx - size)
         right = min(w, cx + size)
 
-        return frame[top:bottom, left:right].copy()
+        return frame[top:bottom, left:right]
 
     def get_resolution(self) -> Tuple[int, int]:
         """Get the capture card resolution."""
