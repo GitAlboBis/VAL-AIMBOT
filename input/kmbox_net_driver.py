@@ -414,6 +414,12 @@ class PacketEncryptor:
 
     KEY_SIZE_BYTES: int = 16
 
+    # Native C accelerator (lazy-loaded, None if DLL not found).
+    # Imported once at class level so the per-packet overhead is zero.
+    _native_encrypt = None
+    _native_decrypt = None
+    _native_probed = False
+
     def __init__(self, mac: int) -> None:
 
         mac &= 0xFFFFFFFF
@@ -432,6 +438,20 @@ class PacketEncryptor:
 
         self._key_words: list = list(struct.unpack("<4I", self._key))
 
+        # Probe native accelerator once per process.
+        if not PacketEncryptor._native_probed:
+            PacketEncryptor._native_probed = True
+            try:
+                from .xxtea_accel import native_xxtea_encrypt, native_xxtea_decrypt
+                PacketEncryptor._native_encrypt = native_xxtea_encrypt
+                PacketEncryptor._native_decrypt = native_xxtea_decrypt
+                if native_xxtea_encrypt is not None:
+                    logger.info("PacketEncryptor: using native C XXTEA accelerator")
+                else:
+                    logger.info("PacketEncryptor: native DLL not found, using Python fallback")
+            except Exception:  # noqa: BLE001
+                logger.info("PacketEncryptor: xxtea_accel import failed, using Python fallback")
+
     @classmethod
     def _normalize(cls, data: bytes) -> bytes:
 
@@ -443,6 +463,11 @@ class PacketEncryptor:
 
         block = self._normalize(plaintext)
 
+        # Fast path: native C XXTEA (~0.005ms vs ~0.5ms Python)
+        if PacketEncryptor._native_encrypt is not None:
+            return PacketEncryptor._native_encrypt(block, self._key_words)
+
+        # Fallback: pure-Python XXTEA
         v = list(struct.unpack("<32I", block))
         k = self._key_words
         n = self.BLOCK_COUNT
@@ -470,6 +495,12 @@ class PacketEncryptor:
     def decrypt(self, ciphertext: bytes) -> bytes:
 
         block = self._normalize(ciphertext)
+
+        # Fast path: native C XXTEA
+        if PacketEncryptor._native_decrypt is not None:
+            return PacketEncryptor._native_decrypt(block, self._key_words)
+
+        # Fallback: pure-Python XXTEA
         v = list(struct.unpack("<32I", block))
         k = self._key_words
         n = self.BLOCK_COUNT

@@ -9,7 +9,7 @@ ai_engine:
   target_classes:
   - 1
 aim:
-  cooldown_ms: 7
+  cooldown_ms: 0
   deadzone_px: 2.0
   enable: true
   fov_radius_px: 80.0
@@ -21,8 +21,8 @@ aim:
   cx_counts_per_2pi: 1637.02
   lock_radius_px: 120.0
   lock_timeout_s: 0.20
-  ema_alpha: 0.40
-  disable_prediction: true
+  ema_alpha: 0.85
+  disable_prediction: false
   prediction_interval: 1.0
   min_speed_multiplier: 0.8
   max_speed_multiplier: 1.5
