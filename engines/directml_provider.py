@@ -12,6 +12,7 @@ Requires: pip install onnxruntime-directml
 """
 
 import numpy as np
+import cv2
 import os
 import time
 import logging
@@ -127,7 +128,6 @@ class DirectMLProvider:
         Returns:
             NCHW float32 tensor (1, 3, imgsz, imgsz)
         """
-        import cv2
         
         # Resize to model input
         resized = cv2.resize(frame, (self.imgsz, self.imgsz))
@@ -179,7 +179,6 @@ class DirectMLProvider:
             return []
         
         # Apply NMS via OpenCV
-        import cv2
         
         # Convert center format to x1,y1,w,h for cv2.dnn.NMSBoxes
         x1 = boxes[:, 0] - boxes[:, 2] / 2

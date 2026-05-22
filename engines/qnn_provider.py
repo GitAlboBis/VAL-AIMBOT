@@ -32,6 +32,7 @@ import time
 from typing import List, Optional, Tuple
 
 import numpy as np
+import cv2
 
 logger = logging.getLogger(__name__)
 
@@ -586,7 +587,6 @@ class QNNProvider:
         Args:
             frame: BGR ``uint8`` image of shape ``(H, W, 3)`` from the capture pipeline.
         """
-        import cv2  # local import — keeps module import cheap on hosts without OpenCV
 
         # Step 1: in-place resize. Some OpenCV builds reject ``dst`` for shape changes,
         # so guard the fast path and fall back to ``np.copyto`` from a freshly resized
@@ -643,7 +643,6 @@ class QNNProvider:
             ``class_id, confidence, x, y, w, h`` (all coerced to native Python
             ``int`` / ``float`` so consumers never see numpy scalars).
         """
-        import cv2  # local import — same lifecycle as ``preprocess``
 
         # (1, 6, N) → (N, 6).
         preds = output[0].T

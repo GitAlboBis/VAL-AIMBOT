@@ -1,6 +1,7 @@
-"""Minimal aim assist -- production build (no debug, no logging overhead)."""
+"""Minimal aim assist -- production build (no debug, no logging overhead)."""
 
 import argparse
+import ctypes
 import math
 import queue
 import sys
@@ -32,37 +33,18 @@ from input.kmbox_net_driver import KmBoxNetDriver, ConnectionStatus
 
 
 # ─── Activation read primitives ───────────────────────────────────────
-# ``_key_down`` is preserved for Requirement 3.6: non-toggle VKs (e.g.
-# f5) SHALL still go through ``GetAsyncKeyState(VK) & 0x8000``. The
-# ``vk`` arm of ``_is_active`` delegates to it.
+# Cached Win32 function pointers — avoids per-frame import + attr lookup.
+_GetAsyncKeyState = ctypes.windll.user32.GetAsyncKeyState
+_GetKeyState = ctypes.windll.user32.GetKeyState
+
 def _key_down(vk_code: int) -> bool:
     """Return True if the given Windows VK is currently held down."""
-    try:
-        import ctypes
-        return bool(ctypes.windll.user32.GetAsyncKeyState(vk_code) & 0x8000)
-    except Exception:  # noqa: BLE001
-        return False
+    return bool(_GetAsyncKeyState(vk_code) & 0x8000)
 
 
 def _caps_lock_on() -> bool:
-    """Return True iff Caps Lock TOGGLE (LED) is currently on.
-
-    Per Microsoft docs, ``GetKeyState`` returns a SHORT where:
-      - bit 15 (sign bit) = key currently held DOWN
-      - bit 0 (low bit)   = toggle state (LED on for Caps Lock / Num Lock /
-                            Scroll Lock)
-
-    The aim-tracking-stabilization spec 2.7(a) requires the *toggle/LED*
-    semantic (RootKit style: press once → LED on → aim active until
-    pressed again), so we test bit 0 — NOT the sign bit. The earlier
-    ``< 0`` check tested the sign bit, which is "currently held",
-    producing HOLD-on-press semantics instead of TOGGLE.
-    """
-    try:
-        import ctypes
-        return bool(ctypes.windll.user32.GetKeyState(0x14) & 0x0001)
-    except Exception:  # noqa: BLE001
-        return False
+    """Return True iff Caps Lock TOGGLE (LED) is currently on."""
+    return bool(_GetKeyState(0x14) & 0x0001)
 
 
 _VK_BY_NAME = {
@@ -355,6 +337,7 @@ def main() -> int:
     _abs = abs
     _min = min
     _max = max
+    _INF = float("inf")
     cap_size_half = cap_size / 2.0
     # Pre-compute FOV conversion constants (only valid when Cx is set)
     if Cx is not None and Cx > 0.0:
@@ -398,7 +381,7 @@ def main() -> int:
             else:
                 if has_lock:
                     # Sticky target lock: closest to last_mid_coord within lock_radius (no FOV check — already locked)
-                    best_lock_d = float("inf")
+                    best_lock_d = _INF
                     for det in detections:
                         hx = det.x
                         hy = det.y - det.h * headshot_bias
@@ -415,7 +398,7 @@ def main() -> int:
 
                 if not has_lock:
                     # Fresh target acquisition: closest to crosshair (cx, cy)
-                    best_crosshair_d = float("inf")
+                    best_crosshair_d = _INF
                     for det in detections:
                         hx = det.x
                         hy = det.y - det.h * headshot_bias
