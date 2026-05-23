@@ -1,9 +1,9 @@
 ai_engine:
   capture_size: 416
-  confidence: 0.35
+  confidence: 0.50
   enabled: true
   execution_provider: auto
-  headshot_bias: 0.37
+  headshot_bias: 0.35
   iou_threshold: 0.45
   model_path: ./models/yolov8m-valorant-detection.onnx
   target_classes:
@@ -12,7 +12,7 @@ aim:
   cooldown_ms: 0
   deadzone_px: 2.0
   enable: true
-  fov_radius_px: 80.0
+  fov_radius_px: 100.0
   legacy_pixel_to_count: 0.85
   pre_multiplier_x: 1.0
   pre_multiplier_y: 1.0
@@ -24,6 +24,9 @@ aim:
   ema_alpha: 0.20
   disable_prediction: false
   prediction_interval: 1.0
+  autofire_enabled: true
+  autofire_tolerance_px: 8.0
+  autofire_cooldown_s: 0.35
   min_speed_multiplier: 1.0
   max_speed_multiplier: 1.0
   ads_multiplier: 0.4

@@ -286,12 +286,12 @@ def main() -> int:
     lock_radius_px = float(aim_cfg.get("lock_radius_px", 100.0))
     lock_timeout_s = float(aim_cfg.get("lock_timeout_s", 0.50))
 
-    # New tracking parameters (sunone-style)
     ema_alpha          = float(aim_cfg.get("ema_alpha", 0.85))
     disable_prediction = bool(aim_cfg.get("disable_prediction", False))
     prediction_interval = float(aim_cfg.get("prediction_interval", 1.0))
-    min_speed_mult     = float(aim_cfg.get("min_speed_multiplier", 0.8))
-    max_speed_mult     = float(aim_cfg.get("max_speed_multiplier", 1.5))
+    autofire_enabled   = bool(aim_cfg.get("autofire_enabled", False))
+    autofire_tolerance = float(aim_cfg.get("autofire_tolerance_px", 5.0))
+    autofire_cooldown  = float(aim_cfg.get("autofire_cooldown_s", 0.3))
     ads_multiplier     = float(aim_cfg.get("ads_multiplier", 1.0))
 
     activation_spec     = _resolve_activation(gen_cfg.get("activation_key", "caps_lock"))
@@ -384,6 +384,7 @@ def main() -> int:
     pred_prev_vy = 0.0
     pred_prev_x = 0.0
     pred_prev_y = 0.0
+    last_shot_time = 0.0
     inflight_history = []
     capture_latency = 0.035  # 35ms di latenza stimata (Capture Card + Kmbox + Monitor)
 
@@ -468,10 +469,27 @@ def main() -> int:
 
                 dx_px = hx - cx
                 dy_px = hy - cy
+                
+                current_t = _perf_counter()
+
+                # ─── Autofire (Triggerbot) ─────────────────────────
+                if autofire_enabled and aim_active:
+                    dist_to_head = _hypot(dx_px, dy_px)
+                    if dist_to_head <= autofire_tolerance:
+                        if current_t - last_shot_time >= autofire_cooldown:
+                            # Spara in un thread separato per non bloccare l'IA (20ms hold)
+                            def _shoot():
+                                try:
+                                    driver._send_cmd_button(0x01, 1)
+                                    time.sleep(0.02)
+                                    driver._send_cmd_button(0x01, 0)
+                                except Exception:
+                                    pass
+                            threading.Thread(target=_shoot, daemon=True).start()
+                            last_shot_time = current_t
 
                 # ─── Smith Predictor (Compensazione Latenza In-Flight) ──────────
                 # Rimuove dalla cronologia i movimenti vecchi (già visibili a schermo)
-                current_t = _perf_counter()
                 inflight_history = [(t, px, py) for (t, px, py) in inflight_history if current_t - t < capture_latency]
                 
                 # Calcola quanti pixel "in volo" non sono ancora stati registrati da YOLO
@@ -540,19 +558,6 @@ def main() -> int:
                     mx *= ema_alpha
                     my *= ema_alpha
 
-                # ─── Adaptive speed multiplier ─────
-                distance = _hypot(dx_px, dy_px)
-                norm_dist = _min(distance / cap_size_half, 1.0)
-                if norm_dist < 0.05:
-                    speed_mult = 1.0  # Near center: precise
-                elif norm_dist < 0.20:
-                    speed_mult = max_speed_mult  # Mid range: fast snap
-                else:
-                    taper = _min((norm_dist - 0.20) / 0.80, 1.0)
-                    speed_mult = max_speed_mult * (1.0 - taper * 0.3)
-                speed_mult = _max(min_speed_mult, _min(max_speed_mult, speed_mult))
-                mx *= speed_mult
-                my *= speed_mult
 
                 # ─── ADS multiplier (right mouse = scoped) ────
                 if ads_multiplier != 1.0:
