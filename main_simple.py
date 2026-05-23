@@ -286,7 +286,7 @@ def main() -> int:
     # 1) Trace once at startup → every subsequent driver.move(dx, dy)
     #    is rendered as a hardware Bezier (Requirement 2.10).
     try:
-        driver.trace(algorithm=trace_algo, delay_ms=trace_delay)
+        driver.trace(algorithm=0, delay_ms=0) # Disabilita l'interpolazione hardware
     except Exception:
         pass
 
@@ -361,9 +361,6 @@ def main() -> int:
     _dbg_moves = 0
     _dbg_aim_on = 0
     _dbg_t0 = time.time()
-
-    rem_x = 0.0
-    rem_y = 0.0
 
     try:
         while True:
@@ -534,25 +531,15 @@ def main() -> int:
                 if ads_multiplier != 1.0:
                     try:
                         if driver.isdown_right():
-                            mx *= ads_multiplier
-                            my *= ads_multiplier
+                            mx /= ads_multiplier
+                            my /= ads_multiplier
                     except Exception:  # noqa: BLE001
                         pass
 
-                # Accumulo sub-pixel (evita il pixel-skipping)
-                mx += rem_x
-                my += rem_y
-                
-                int_mx = int(mx)
-                int_my = int(my)
-                
-                rem_x = mx - int_mx
-                rem_y = my - int_my
-
-                # Invia al Kmbox solo se c'è un intero effettivo da muovere
-                if int_mx != 0 or int_my != 0:
-                    mouse_worker.queue_move(int_mx, int_my)
-                    _dbg_moves += 1
+                # ─── ASYNC move (Produzione) ─
+                # Invia float crudi. Il driver gestirà i resti internamente!
+                mouse_worker.queue_move(mx, my)
+                _dbg_moves += 1
 
             # ─── Debug status print (1 Hz) ─────────────────────────
             if time.time() - _dbg_t0 >= 1.0:
@@ -563,6 +550,8 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        try: driver.monitor(0)  # Spegne la trasmissione UDP dal Kmbox prima di chiudere
+        except Exception: pass
         try: mouse_worker.stop()
         except Exception: pass
         try: capture.cleanup()

@@ -16,7 +16,7 @@ aim:
   legacy_pixel_to_count: 0.85
   pre_multiplier_x: 1.0
   pre_multiplier_y: 1.0
-  trace_algorithm: 2
+  trace_algorithm: 0
   trace_delay_ms: 50
   cx_counts_per_2pi: 1637.02
   lock_radius_px: 120.0
