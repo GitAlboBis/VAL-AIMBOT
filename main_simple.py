@@ -192,7 +192,10 @@ class MouseWorker:
             try:
                 for _ in range(steps):
                     self._driver.move(step_x, step_y)
-                    time.sleep(sleep_time)
+                    # Busy-wait precisissimo al microsecondo invece di time.sleep()
+                    target_t = time.perf_counter() + sleep_time
+                    while time.perf_counter() < target_t:
+                        pass 
             except Exception:
                 pass  # Driver errors are already logged internally.
 
@@ -377,8 +380,10 @@ def main() -> int:
 
     rem_x = 0.0
     rem_y = 0.0
-    integral_x = 0.0
-    integral_y = 0.0
+    pred_prev_vx = 0.0
+    pred_prev_vy = 0.0
+    pred_prev_x = 0.0
+    pred_prev_y = 0.0
     inflight_history = []
     capture_latency = 0.035  # 35ms di latenza stimata (Capture Card + Kmbox + Monitor)
 
@@ -477,28 +482,35 @@ def main() -> int:
                 dx_px -= inflight_x
                 dy_px -= inflight_y
 
-                # ─── Proportional-Integral (PI) Controller (Anti-Latency) ──────────
+                # ─── Predizione Cinematica (Derivata Pura) ──────────
                 if not disable_prediction:
                     dt = 0.016 if pred_prev_time is None else min(current_t - pred_prev_time, 0.1)
-                    pred_prev_time = current_t
-
-                    if not has_lock:
-                        integral_x = 0.0
-                        integral_y = 0.0
+                    
+                    if not has_lock or pred_prev_time is None:
+                        # Reset della velocità se abbiamo appena agganciato
+                        pred_prev_vx = 0.0
+                        pred_prev_vy = 0.0
+                        pred_prev_x = dx_px
+                        pred_prev_y = dy_px
                     else:
-                        # Accumulo l'errore compensato
-                        integral_x += dx_px * dt
-                        integral_y += dy_px * dt
-
-                        integral_x *= 0.90
-                        integral_y *= 0.90
-
-                        ki = prediction_interval * 4.0
-                        dx_px += integral_x * ki
-                        dy_px += integral_y * ki
+                        # Grazie allo Smith Predictor, dx_px è già "pulito" dai tuoi movimenti del mouse.
+                        # La sua variazione è quindi la VERA velocità del bersaglio!
+                        vx = (dx_px - pred_prev_x) / dt
+                        vy = (dy_px - pred_prev_y) / dt
+                        
+                        # Filtro EMA leggero SOLO sulla velocità per assorbire i micro-tremolii di YOLO
+                        pred_prev_vx = pred_prev_vx * 0.7 + vx * 0.3
+                        pred_prev_vy = pred_prev_vy * 0.7 + vy * 0.3
+                        
+                        # Applica l'anticipo (prediction_interval funge da moltiplicatore)
+                        dx_px += pred_prev_vx * (prediction_interval * 0.05)
+                        dy_px += pred_prev_vy * (prediction_interval * 0.05)
+                        
+                    # Salva lo stato per il frame successivo
+                    pred_prev_x = dx_px
+                    pred_prev_y = dy_px
+                    pred_prev_time = current_t
                 else:
-                    integral_x = 0.0
-                    integral_y = 0.0
                     pred_prev_time = None
                 
                 # ─── Z-Depth Dynamic Deadzone (Anti-Wobble / Anti-Orbita) ──
