@@ -278,8 +278,6 @@ def main() -> int:
     Cx = float(cx_raw) if cx_raw is not None else None
     pre_x      = float(aim_cfg.get("pre_multiplier_x", 1.0))
     pre_y      = float(aim_cfg.get("pre_multiplier_y", 1.0))
-    legacy_p2c = float(aim_cfg.get("legacy_pixel_to_count",
-                                   aim_cfg.get("pixel_to_count", 0.85)))
     trace_algo  = int(aim_cfg.get("trace_algorithm", 2))
     trace_delay = int(aim_cfg.get("trace_delay_ms", 80))
     deadzone_px = float(aim_cfg.get("deadzone_px", 2.0))
@@ -542,16 +540,12 @@ def main() -> int:
                     continue
 
                 # ─── Inline FOV conversion (avoid function call overhead) ──
-                if _fov_use_trig:
-                    dx_pre = dx_px * pre_x
-                    dy_pre = dy_px * pre_y
-                    yaw_rad = _atan2(dx_pre, _focal_length_px)
-                    pitch_rad = _atan2(dy_pre, _sqrt(dx_pre * dx_pre + _focal_length_px * _focal_length_px))
-                    mx = yaw_rad * _counts_per_rad
-                    my = pitch_rad * _counts_per_rad
-                else:
-                    mx = dx_px * legacy_p2c
-                    my = dy_px * legacy_p2c
+                dx_pre = dx_px * pre_x
+                dy_pre = dy_px * pre_y
+                yaw_rad = _atan2(dx_pre, _focal_length_px)
+                pitch_rad = _atan2(dy_pre, _sqrt(dx_pre * dx_pre + _focal_length_px * _focal_length_px))
+                mx = yaw_rad * _counts_per_rad
+                my = pitch_rad * _counts_per_rad
 
                 # ─── Division smoothing (stateless, no overshoot) ──
                 if ema_alpha < 1.0 and ema_alpha > 0.0:
@@ -574,14 +568,10 @@ def main() -> int:
                     _dbg_moves += 1
 
                     # Registra il movimento appena inviato nella memoria In-Flight
-                    if _fov_use_trig:
-                        yaw_moved = mx / _counts_per_rad
-                        pitch_moved = my / _counts_per_rad
-                        moved_px = (math.tan(yaw_moved) * _focal_length_px) / pre_x
-                        moved_py = (math.tan(pitch_moved) * _focal_length_px) / pre_y
-                    else:
-                        moved_px = mx / legacy_p2c
-                        moved_py = my / legacy_p2c
+                    yaw_moved = mx / _counts_per_rad
+                    pitch_moved = my / _counts_per_rad
+                    moved_px = (math.tan(yaw_moved) * _focal_length_px) / pre_x
+                    moved_py = (math.tan(pitch_moved) * _focal_length_px) / pre_y
                     
                     inflight_history.append((current_t, moved_px, moved_py))
 

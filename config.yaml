@@ -12,7 +12,7 @@ aim:
   cooldown_ms: 0
   deadzone_px: 2.0
   enable: true
-  fov_radius_px: 100.0
+  fov_radius_px: 120.0
   legacy_pixel_to_count: 0.85
   pre_multiplier_x: 1.0
   pre_multiplier_y: 1.0
