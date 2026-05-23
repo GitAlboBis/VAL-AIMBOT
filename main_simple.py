@@ -237,6 +237,7 @@ def main() -> int:
         _os.dup2(_saved1, 1); _os.dup2(_saved2, 2)
         _os.close(_saved1); _os.close(_saved2); _os.close(_devnull)
     if not model_loaded:
+        print("\n[ERRORE CRITICO] Fallimento: Il modello AI non è stato caricato correttamente.\n", file=sys.stderr)
         capture.cleanup()
         return 1
 
@@ -248,6 +249,9 @@ def main() -> int:
         target_cps=config.get("rapid_fire", {}).get("target_cps", 10),
     )
     if driver.connection_status is not ConnectionStatus.CONNECTED:
+        print(f"\n[ERRORE CRITICO] Timeout: Impossibile connettersi al Kmbox Net!", file=sys.stderr)
+        print(f"  -> Tentativo su IP: {km_cfg['ip']} | Porta: {km_cfg['port']} | UUID: {km_cfg['uuid']}", file=sys.stderr)
+        print("  -> Verifica che il Kmbox sia connesso alla rete e che i dati nel config.yaml siano corretti.\n", file=sys.stderr)
         capture.cleanup(); engine.release()
         return 1
 
@@ -361,6 +365,9 @@ def main() -> int:
     _dbg_moves = 0
     _dbg_aim_on = 0
     _dbg_t0 = time.time()
+
+    rem_x = 0.0
+    rem_y = 0.0
 
     try:
         while True:
@@ -536,10 +543,19 @@ def main() -> int:
                     except Exception:  # noqa: BLE001
                         pass
 
-                # ─── ASYNC move (Produzione) ─
-                # Invia float crudi. Il driver gestirà i resti internamente!
-                mouse_worker.queue_move(mx, my)
-                _dbg_moves += 1
+                # Accumulo sub-pixel manuale
+                mx += rem_x
+                my += rem_y
+                
+                int_mx = int(mx)
+                int_my = int(my)
+                
+                rem_x = mx - int_mx
+                rem_y = my - int_my
+
+                if int_mx != 0 or int_my != 0:
+                    mouse_worker.queue_move(int_mx, int_my) # ORA SONO INT PURI!
+                    _dbg_moves += 1
 
             # ─── Debug status print (1 Hz) ─────────────────────────
             if time.time() - _dbg_t0 >= 1.0:

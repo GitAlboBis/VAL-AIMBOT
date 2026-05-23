@@ -25,7 +25,7 @@ aim:
   disable_prediction: false
   prediction_interval: 1.0
   min_speed_multiplier: 0.8
-  max_speed_multiplier: 1.5
+  max_speed_multiplier: 1.0
   ads_multiplier: 0.4
 capture:
   backend: capture_card
