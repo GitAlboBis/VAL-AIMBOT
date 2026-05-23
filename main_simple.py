@@ -177,14 +177,23 @@ class MouseWorker:
             pass  # Worker is busy; this frame's command is dropped.
 
     def _worker_loop(self) -> None:
+        steps = 5
+        sleep_time = 0.002  # 2ms tra ogni micro-step (totale 10ms)
+        
         while not self._stop.is_set():
             try:
                 mx, my = self._queue.get(timeout=0.05)
             except queue.Empty:
                 continue
+            
+            step_x = mx / steps
+            step_y = my / steps
+            
             try:
-                self._driver.move(mx, my)
-            except Exception:  # noqa: BLE001
+                for _ in range(steps):
+                    self._driver.move(step_x, step_y)
+                    time.sleep(sleep_time)
+            except Exception:
                 pass  # Driver errors are already logged internally.
 
     def stop(self) -> None:
@@ -290,7 +299,7 @@ def main() -> int:
     # 1) Trace once at startup → every subsequent driver.move(dx, dy)
     #    is rendered as a hardware Bezier (Requirement 2.10).
     try:
-        driver.trace(algorithm=0, delay_ms=0) # Disabilita l'interpolazione hardware
+        driver.trace(algorithm=trace_algo, delay_ms=trace_delay)
     except Exception:
         pass
 
@@ -368,6 +377,10 @@ def main() -> int:
 
     rem_x = 0.0
     rem_y = 0.0
+    integral_x = 0.0
+    integral_y = 0.0
+    inflight_history = []
+    capture_latency = 0.035  # 35ms di latenza stimata (Capture Card + Kmbox + Monitor)
 
     try:
         while True:
@@ -448,59 +461,54 @@ def main() -> int:
                 hx = best.x
                 hy = best.y - best.h * headshot_bias
 
-                # ─── Kinematic prediction (Corretta per AI Bounding Boxes) ──────────
-                if not disable_prediction:
-                    current_pred_t = _perf_counter()
-                    if pred_prev_time is None:
-                        # Primo target — nessuna predizione ancora
-                        pred_prev_x, pred_prev_y = hx, hy
-                        pred_prev_time = current_pred_t
-                        pred_prev_vx = pred_prev_vy = 0.0
-                    else:
-                        # Rileva cambio bersaglio improvviso (> 30% dello schermo)
-                        max_jump = cap_size * 0.3
-                        if _abs(hx - pred_prev_x) > max_jump or _abs(hy - pred_prev_y) > max_jump:
-                            pred_prev_x, pred_prev_y = hx, hy
-                            pred_prev_vx = pred_prev_vy = 0.0
-                            pred_prev_time = current_pred_t
-                        else:
-                            dt = current_pred_t - pred_prev_time
-                            if dt < 1e-6:
-                                dt = 1e-6
-                            
-                            # 1. Calcolo Velocità Istantanea (Pixel al secondo)
-                            raw_vx = (hx - pred_prev_x) / dt
-                            raw_vy = (hy - pred_prev_y) / dt
-
-                            # 2. Smussamento Velocità (Filtro Passa-Basso)
-                            # Questo ignora i tremolii di 1-2 pixel tipici di YOLO
-                            smooth_factor = 0.4  # Più è basso, più ignora i tremolii
-                            vx = pred_prev_vx + smooth_factor * (raw_vx - pred_prev_vx)
-                            vy = pred_prev_vy + smooth_factor * (raw_vy - pred_prev_vy)
-
-                            # 3. Applicazione della Predizione Futura
-                            # prediction_interval nel config fungerà da moltiplicatore puro.
-                            # 1.0 = guarda avanti di 1 frame. 2.0 = guarda avanti di 2 frame.
-                            pred_dt = dt * prediction_interval
-                            
-                            hx = hx + vx * pred_dt
-                            hy = hy + vy * pred_dt
-
-                            # Salvataggio della velocità smussata per il prossimo frame
-                            pred_prev_vx, pred_prev_vy = vx, vy
-
-                        # Salvataggio coordinate RAW (non predette) dell'AI per il calcolo della velocità successiva
-                        pred_prev_x, pred_prev_y = best.x, best.y - best.h * headshot_bias
-                        pred_prev_time = current_pred_t
-                else:
-                    # Resetta lo stato se disabilitata
-                    pred_prev_time = None
-
                 dx_px = hx - cx
                 dy_px = hy - cy
+
+                # ─── Smith Predictor (Compensazione Latenza In-Flight) ──────────
+                # Rimuove dalla cronologia i movimenti vecchi (già visibili a schermo)
+                current_t = _perf_counter()
+                inflight_history = [(t, px, py) for (t, px, py) in inflight_history if current_t - t < capture_latency]
                 
-                # Controllo deadzone (Ora paragona correttamente Pixel con Pixel)
-                if _hypot(dx_px, dy_px) < deadzone_px:
+                # Calcola quanti pixel "in volo" non sono ancora stati registrati da YOLO
+                inflight_x = sum(px for (t, px, py) in inflight_history)
+                inflight_y = sum(py for (t, px, py) in inflight_history)
+                
+                # Sottrae il movimento in volo dalla distanza reale per evitare overshoot (scatti sballati)
+                dx_px -= inflight_x
+                dy_px -= inflight_y
+
+                # ─── Proportional-Integral (PI) Controller (Anti-Latency) ──────────
+                if not disable_prediction:
+                    dt = 0.016 if pred_prev_time is None else min(current_t - pred_prev_time, 0.1)
+                    pred_prev_time = current_t
+
+                    if not has_lock:
+                        integral_x = 0.0
+                        integral_y = 0.0
+                    else:
+                        # Accumulo l'errore compensato
+                        integral_x += dx_px * dt
+                        integral_y += dy_px * dt
+
+                        integral_x *= 0.90
+                        integral_y *= 0.90
+
+                        ki = prediction_interval * 4.0
+                        dx_px += integral_x * ki
+                        dy_px += integral_y * ki
+                else:
+                    integral_x = 0.0
+                    integral_y = 0.0
+                    pred_prev_time = None
+                
+                # ─── Z-Depth Dynamic Deadzone (Anti-Wobble / Anti-Orbita) ──
+                # Usa deadzone_px (es. 2.0) come base minima per la precisione sui tiri da lontano.
+                # Per i bersagli vicini (best.h enorme), espande la deadzone al 6% dell'altezza del box.
+                # Questo permette al mouse di "parcheggiarsi" nella grande testa del bersaglio vicino
+                # ignorando i forti tremolii delle animazioni di YOLO, prevenendo il movimento circolare.
+                dynamic_deadzone = _max(deadzone_px, best.h * 0.06)
+
+                if _hypot(dx_px, dy_px) < dynamic_deadzone:
                     continue
 
                 # ─── Inline FOV conversion (avoid function call overhead) ──
@@ -543,19 +551,22 @@ def main() -> int:
                     except Exception:  # noqa: BLE001
                         pass
 
-                # Accumulo sub-pixel manuale
-                mx += rem_x
-                my += rem_y
-                
-                int_mx = int(mx)
-                int_my = int(my)
-                
-                rem_x = mx - int_mx
-                rem_y = my - int_my
-
-                if int_mx != 0 or int_my != 0:
-                    mouse_worker.queue_move(int_mx, int_my) # ORA SONO INT PURI!
+                # Invio al MouseWorker per l'Interpolazione Software
+                if abs(mx) > 0.01 or abs(my) > 0.01:
+                    mouse_worker.queue_move(mx, my)
                     _dbg_moves += 1
+
+                    # Registra il movimento appena inviato nella memoria In-Flight
+                    if _fov_use_trig:
+                        yaw_moved = mx / _counts_per_rad
+                        pitch_moved = my / _counts_per_rad
+                        moved_px = (math.tan(yaw_moved) * _focal_length_px) / pre_x
+                        moved_py = (math.tan(pitch_moved) * _focal_length_px) / pre_y
+                    else:
+                        moved_px = mx / legacy_p2c
+                        moved_py = my / legacy_p2c
+                    
+                    inflight_history.append((current_t, moved_px, moved_py))
 
             # ─── Debug status print (1 Hz) ─────────────────────────
             if time.time() - _dbg_t0 >= 1.0:
