@@ -121,10 +121,16 @@ def fov_to_counts(
         return (dx_px * legacy_pixel_to_count, dy_px * legacy_pixel_to_count)
     dx_pre = dx_px * pre_x
     dy_pre = dy_px * pre_y
-    Rx = Cx / (2.0 * math.pi)
-    Ry = Cx / (2.0 * math.pi)
-    mx = math.atan2(dx_pre, Rx) * Rx
-    my = math.atan2(dy_pre, math.sqrt(dx_pre * dx_pre + Rx * Rx)) * Ry
+    
+    # 103° FOV in radians, assuming 1920px screen width for the fallback func
+    fov_rad = math.radians(103.0)
+    focal_length_px = (1920.0 / 2.0) / math.tan(fov_rad / 2.0)
+    
+    yaw_rad = math.atan2(dx_pre, focal_length_px)
+    pitch_rad = math.atan2(dy_pre, math.sqrt(dx_pre * dx_pre + focal_length_px * focal_length_px))
+    
+    mx = yaw_rad * Cx
+    my = pitch_rad * Cx
     return (mx, my)
 
 
@@ -341,10 +347,13 @@ def main() -> int:
     cap_size_half = cap_size / 2.0
     # Pre-compute FOV conversion constants (only valid when Cx is set)
     if Cx is not None and Cx > 0.0:
-        _fov_Rx = Cx / (2.0 * math.pi)
+        _counts_per_rad = Cx
+        fov_rad = math.radians(103.0)
+        _focal_length_px = (cap_w / 2.0) / math.tan(fov_rad / 2.0)
         _fov_use_trig = True
     else:
-        _fov_Rx = 0.0
+        _counts_per_rad = 0.0
+        _focal_length_px = 1.0
         _fov_use_trig = False
     # ─── Debug counters ────────────────────────────────────────────
     _dbg_fps = 0
@@ -352,6 +361,9 @@ def main() -> int:
     _dbg_moves = 0
     _dbg_aim_on = 0
     _dbg_t0 = time.time()
+
+    rem_x = 0.0
+    rem_y = 0.0
 
     try:
         while True:
@@ -432,96 +444,114 @@ def main() -> int:
                 hx = best.x
                 hy = best.y - best.h * headshot_bias
 
-                # ─── Kinematic prediction (sunone-style) ──────────
+                # ─── Kinematic prediction (Corretta per AI Bounding Boxes) ──────────
                 if not disable_prediction:
                     current_pred_t = _perf_counter()
                     if pred_prev_time is None:
-                        # First target — no prediction yet
+                        # Primo target — nessuna predizione ancora
                         pred_prev_x, pred_prev_y = hx, hy
                         pred_prev_time = current_pred_t
                         pred_prev_vx = pred_prev_vy = 0.0
                     else:
-                        # Detect target switch (jump > 30% of screen)
+                        # Rileva cambio bersaglio improvviso (> 30% dello schermo)
                         max_jump = cap_size * 0.3
                         if _abs(hx - pred_prev_x) > max_jump or _abs(hy - pred_prev_y) > max_jump:
                             pred_prev_x, pred_prev_y = hx, hy
                             pred_prev_vx = pred_prev_vy = 0.0
                             pred_prev_time = current_pred_t
-                            pred_prev_distance = None
                         else:
                             dt = current_pred_t - pred_prev_time
                             if dt < 1e-6:
                                 dt = 1e-6
-                            vx = (hx - pred_prev_x) / dt
-                            vy = (hy - pred_prev_y) / dt
-                            ax = (vx - pred_prev_vx) / dt
-                            ay = (vy - pred_prev_vy) / dt
+                            
+                            # 1. Calcolo Velocità Istantanea (Pixel al secondo)
+                            raw_vx = (hx - pred_prev_x) / dt
+                            raw_vy = (hy - pred_prev_y) / dt
 
+                            # 2. Smussamento Velocità (Filtro Passa-Basso)
+                            # Questo ignora i tremolii di 1-2 pixel tipici di YOLO
+                            smooth_factor = 0.4  # Più è basso, più ignora i tremolii
+                            vx = pred_prev_vx + smooth_factor * (raw_vx - pred_prev_vx)
+                            vy = pred_prev_vy + smooth_factor * (raw_vy - pred_prev_vy)
+
+                            # 3. Applicazione della Predizione Futura
+                            # prediction_interval nel config fungerà da moltiplicatore puro.
+                            # 1.0 = guarda avanti di 1 frame. 2.0 = guarda avanti di 2 frame.
                             pred_dt = dt * prediction_interval
-                            cur_dist = _hypot(hx - pred_prev_x, hy - pred_prev_y)
-                            proximity = _max(0.1, _min(1.0, 1.0 / (cur_dist + 1.0)))
+                            
+                            hx = hx + vx * pred_dt
+                            hy = hy + vy * pred_dt
 
-                            speed_corr = 1.0
-                            if pred_prev_distance is not None and max_pred_distance > 0:
-                                speed_corr = 1.0 + (_abs(cur_dist - pred_prev_distance) / max_pred_distance) * 0.1
-
-                            hx = hx + vx * pred_dt * proximity * speed_corr + 0.5 * ax * (pred_dt ** 2) * proximity * speed_corr
-                            hy = hy + vy * pred_dt * proximity * speed_corr + 0.5 * ay * (pred_dt ** 2) * proximity * speed_corr
-
+                            # Salvataggio della velocità smussata per il prossimo frame
                             pred_prev_vx, pred_prev_vy = vx, vy
-                            pred_prev_distance = cur_dist
 
+                        # Salvataggio coordinate RAW (non predette) dell'AI per il calcolo della velocità successiva
                         pred_prev_x, pred_prev_y = best.x, best.y - best.h * headshot_bias
                         pred_prev_time = current_pred_t
                 else:
-                    # Reset prediction state when disabled
+                    # Resetta lo stato se disabilitata
                     pred_prev_time = None
 
                 dx_px = hx - cx
                 dy_px = hy - cy
+                
+                # Controllo deadzone (Ora paragona correttamente Pixel con Pixel)
+                if _hypot(dx_px, dy_px) < deadzone_px:
+                    continue
 
                 # ─── Inline FOV conversion (avoid function call overhead) ──
                 if _fov_use_trig:
                     dx_pre = dx_px * pre_x
                     dy_pre = dy_px * pre_y
-                    mx = _atan2(dx_pre, _fov_Rx) * _fov_Rx
-                    my = _atan2(dy_pre, _sqrt(dx_pre * dx_pre + _fov_Rx * _fov_Rx)) * _fov_Rx
+                    yaw_rad = _atan2(dx_pre, _focal_length_px)
+                    pitch_rad = _atan2(dy_pre, _sqrt(dx_pre * dx_pre + _focal_length_px * _focal_length_px))
+                    mx = yaw_rad * _counts_per_rad
+                    my = pitch_rad * _counts_per_rad
                 else:
                     mx = dx_px * legacy_p2c
                     my = dy_px * legacy_p2c
-                if _hypot(mx, my) < deadzone_px:
-                    pass  # Req 2.13: sub-deadzone → no move, no cooldown
+
+                # ─── Division smoothing (stateless, no overshoot) ──
+                if ema_alpha < 1.0 and ema_alpha > 0.0:
+                    mx *= ema_alpha
+                    my *= ema_alpha
+
+                # ─── Adaptive speed multiplier ─────
+                distance = _hypot(dx_px, dy_px)
+                norm_dist = _min(distance / cap_size_half, 1.0)
+                if norm_dist < 0.05:
+                    speed_mult = 1.0  # Near center: precise
+                elif norm_dist < 0.20:
+                    speed_mult = max_speed_mult  # Mid range: fast snap
                 else:
-                    # ─── Division smoothing (stateless, no overshoot) ──
-                    if ema_alpha < 1.0 and ema_alpha > 0.0:
-                        mx *= ema_alpha
-                        my *= ema_alpha
+                    taper = _min((norm_dist - 0.20) / 0.80, 1.0)
+                    speed_mult = max_speed_mult * (1.0 - taper * 0.3)
+                speed_mult = _max(min_speed_mult, _min(max_speed_mult, speed_mult))
+                mx *= speed_mult
+                my *= speed_mult
 
-                    # ─── Adaptive speed multiplier ─────
-                    distance = _hypot(dx_px, dy_px)
-                    norm_dist = _min(distance / cap_size_half, 1.0)
-                    if norm_dist < 0.05:
-                        speed_mult = 1.0  # Near center: precise
-                    elif norm_dist < 0.20:
-                        speed_mult = max_speed_mult  # Mid range: fast snap
-                    else:
-                        taper = _min((norm_dist - 0.20) / 0.80, 1.0)
-                        speed_mult = max_speed_mult * (1.0 - taper * 0.3)
-                    speed_mult = _max(min_speed_mult, _min(max_speed_mult, speed_mult))
-                    mx *= speed_mult
-                    my *= speed_mult
+                # ─── ADS multiplier (right mouse = scoped) ────
+                if ads_multiplier != 1.0:
+                    try:
+                        if driver.isdown_right():
+                            mx *= ads_multiplier
+                            my *= ads_multiplier
+                    except Exception:  # noqa: BLE001
+                        pass
 
-                    # ─── ADS multiplier (right mouse = scoped) ────
-                    if ads_multiplier != 1.0:
-                        try:
-                            if driver.isdown_right():
-                                mx *= ads_multiplier
-                                my *= ads_multiplier
-                        except Exception:  # noqa: BLE001
-                            pass
+                # Accumulo sub-pixel (evita il pixel-skipping)
+                mx += rem_x
+                my += rem_y
+                
+                int_mx = int(mx)
+                int_my = int(my)
+                
+                rem_x = mx - int_mx
+                rem_y = my - int_my
 
-                    # ─── DIRECT move (bypass MouseWorker for debug) ─
-                    driver.move(mx, my)
+                # Invia al Kmbox solo se c'è un intero effettivo da muovere
+                if int_mx != 0 or int_my != 0:
+                    mouse_worker.queue_move(int_mx, int_my)
                     _dbg_moves += 1
 
             # ─── Debug status print (1 Hz) ─────────────────────────

@@ -17,11 +17,11 @@ aim:
   pre_multiplier_x: 1.0
   pre_multiplier_y: 1.0
   trace_algorithm: 2
-  trace_delay_ms: 80
+  trace_delay_ms: 50
   cx_counts_per_2pi: 1637.02
   lock_radius_px: 120.0
   lock_timeout_s: 0.50
-  ema_alpha: 0.25
+  ema_alpha: 0.20
   disable_prediction: false
   prediction_interval: 1.0
   min_speed_multiplier: 0.8
