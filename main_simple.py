@@ -90,13 +90,31 @@ def _resolve_activation(name: Optional[str]) -> ActivationSpec:
     return ActivationSpec('vk', _VK_BY_NAME.get(n, 0x14))
 
 
+_toggle_state = False
+_last_button_state = False
+
 def _is_active(spec: ActivationSpec, driver: KmBoxNetDriver) -> bool:
     """Mode dispatch for the activation read (design.md §4.4)."""
+    global _toggle_state, _last_button_state
+    
     if spec.mode == 'caps_lock':
         return _caps_lock_on()
+        
     if spec.mode == 'mouse_side1':
-        try: return bool(driver.isdown_side1())
-        except Exception: return False  # noqa: BLE001, E701
+        try: 
+            current_state = bool(driver.isdown_side1())
+            if current_state and not _last_button_state:
+                _toggle_state = not _toggle_state
+                # Suono opzionale di sistema per capire se è acceso o spento
+                if _toggle_state:
+                    print("\r[AIMBOT] ATTIVATO (ON)  ", end="", flush=True)
+                else:
+                    print("\r[AIMBOT] DISATTIVATO (OFF)", end="", flush=True)
+            _last_button_state = current_state
+            return _toggle_state
+        except Exception: 
+            return False
+            
     if spec.mode == 'mouse_side2':
         try: return bool(driver.isdown_side2())
         except Exception: return False  # noqa: BLE001, E701
@@ -554,9 +572,11 @@ def main() -> int:
 
 
                 # ─── ADS multiplier (right mouse = scoped) ────
+                is_ads = False
                 if ads_multiplier != 1.0:
                     try:
                         if driver.isdown_right():
+                            is_ads = True
                             mx /= ads_multiplier
                             my /= ads_multiplier
                     except Exception:  # noqa: BLE001
@@ -568,8 +588,13 @@ def main() -> int:
                     _dbg_moves += 1
 
                     # Registra il movimento appena inviato nella memoria In-Flight
-                    yaw_moved = mx / _counts_per_rad
-                    pitch_moved = my / _counts_per_rad
+                    # Se siamo in ADS, il gioco riduce la sensibilità, quindi abbiamo dovuto inviare un `mx` gonfiato.
+                    # Ma per calcolare quanti pixel a schermo ci siamo mossi realmente, dobbiamo sgonfiarlo!
+                    record_mx = mx * ads_multiplier if is_ads else mx
+                    record_my = my * ads_multiplier if is_ads else my
+
+                    yaw_moved = record_mx / _counts_per_rad
+                    pitch_moved = record_my / _counts_per_rad
                     moved_px = (math.tan(yaw_moved) * _focal_length_px) / pre_x
                     moved_py = (math.tan(pitch_moved) * _focal_length_px) / pre_y
                     
