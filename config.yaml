@@ -9,7 +9,7 @@ ai_engine:
   target_classes:
   - 1
 aim:
-  cooldown_ms: 0
+
   deadzone_px: 1.0
   enable: true
   fov_radius_px: 80.0
@@ -26,8 +26,7 @@ aim:
   autofire_enabled: false
   autofire_tolerance_px: 10.0
   autofire_cooldown_s: 0.15
-  min_speed_multiplier: 1.0
-  max_speed_multiplier: 1.0
+
   ads_multiplier: 0.4
 capture:
   backend: capture_card

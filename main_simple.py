@@ -124,34 +124,6 @@ def _is_active(spec: ActivationSpec, driver: KmBoxNetDriver) -> bool:
     return False
 
 
-# ─── Trig FOV conversion (design.md File 3 entry 3 / §4.5) ────────────
-def fov_to_counts(
-    dx_px: float, dy_px: float,
-    pre_x: float, pre_y: float, Cx: Optional[float],
-    legacy_pixel_to_count: float = 0.85,
-) -> Tuple[float, float]:
-    """Pixel offset → kmbox HID counts (kvmaibox fov() formula).
-
-    Falls back to linear ``(dx_px*legacy, dy_px*legacy)`` when ``Cx``
-    is unset (design.md §4.5 legacy fallback).
-    """
-    if Cx is None or Cx <= 0.0:
-        return (dx_px * legacy_pixel_to_count, dy_px * legacy_pixel_to_count)
-    dx_pre = dx_px * pre_x
-    dy_pre = dy_px * pre_y
-    
-    # 103° FOV in radians, assuming 1920px screen width for the fallback func
-    fov_rad = math.radians(103.0)
-    focal_length_px = (1920.0 / 2.0) / math.tan(fov_rad / 2.0)
-    
-    yaw_rad = math.atan2(dx_pre, focal_length_px)
-    pitch_rad = math.atan2(dy_pre, math.sqrt(dx_pre * dx_pre + focal_length_px * focal_length_px))
-    
-    mx = yaw_rad * Cx
-    my = pitch_rad * Cx
-    return (mx, my)
-
-
 
 # ─── Module-level selector cache (Requirement 2.2 / §4.1 (b)) ─────────
 last_mid_coord: Optional[Tuple[float, float]] = None
@@ -350,18 +322,7 @@ def main() -> int:
     last_mid_coord = None
     last_target_time = 0.0
 
-    # ─── Prediction state (sunone-style kinematic prediction) ──────
-    pred_prev_x: float = 0.0
-    pred_prev_y: float = 0.0
     pred_prev_time: Optional[float] = None
-    pred_prev_vx: float = 0.0
-    pred_prev_vy: float = 0.0
-    pred_prev_distance: Optional[float] = None
-    max_pred_distance = math.sqrt(cap_size**2 + cap_size**2) / 2.0
-
-    # ─── EMA smoothing state ──────────────────────────────────────
-    ema_last_mx: float = 0.0
-    ema_last_my: float = 0.0
 
     if not args.silent:
         print("Running.")
@@ -372,7 +333,7 @@ def main() -> int:
     _atan2 = math.atan2
     _sqrt = math.sqrt
     _perf_counter = time.perf_counter
-    _abs = abs
+
     _min = min
     _max = max
     _INF = float("inf")
@@ -382,11 +343,9 @@ def main() -> int:
         _counts_per_rad = Cx
         fov_rad = math.radians(103.0)
         _focal_length_px = (cap_w / 2.0) / math.tan(fov_rad / 2.0)
-        _fov_use_trig = True
     else:
         _counts_per_rad = 0.0
         _focal_length_px = 1.0
-        _fov_use_trig = False
     # ─── Debug counters ────────────────────────────────────────────
     _dbg_fps = 0
     _dbg_dets = 0
@@ -394,8 +353,7 @@ def main() -> int:
     _dbg_aim_on = 0
     _dbg_t0 = time.time()
 
-    rem_x = 0.0
-    rem_y = 0.0
+
     pred_prev_vx = 0.0
     pred_prev_vy = 0.0
     pred_prev_x = 0.0
@@ -440,7 +398,7 @@ def main() -> int:
                     last_mid_coord = None
                     # Reset prediction & EMA when target is fully lost
                     pred_prev_time = None
-                    ema_last_mx = ema_last_my = 0.0
+
             else:
                 if has_lock:
                     # Sticky target lock: closest to last_mid_coord within lock_radius (no FOV check — already locked)
@@ -547,12 +505,11 @@ def main() -> int:
                 else:
                     pred_prev_time = None
                 
-                # ─── Z-Depth Dynamic Deadzone (Anti-Wobble / Anti-Orbita) ──
-                # Usa deadzone_px (es. 2.0) come base minima per la precisione sui tiri da lontano.
-                # Per i bersagli vicini (best.h enorme), espande la deadzone al 6% dell'altezza del box.
-                # Questo permette al mouse di "parcheggiarsi" nella grande testa del bersaglio vicino
-                # ignorando i forti tremolii delle animazioni di YOLO, prevenendo il movimento circolare.
-                dynamic_deadzone = _max(deadzone_px, best.h * 0.06)
+                # ─── Hybrid Deadzone ──
+                # Mantiene la deadzone minima per il rumore termico di YOLO (1 pixel base)
+                # Ma impedisce che diventi così grande da ingoiare i movimenti sui target vicini.
+                # Tetto massimo imposto a 4 pixel per non perdere mai il tracking nei jiggle.
+                dynamic_deadzone = _min(4.0, _max(deadzone_px, best.h * 0.03))
 
                 if _hypot(dx_px, dy_px) < dynamic_deadzone:
                     continue
@@ -565,10 +522,24 @@ def main() -> int:
                 mx = yaw_rad * _counts_per_rad
                 my = pitch_rad * _counts_per_rad
 
-                # ─── Division smoothing (stateless, no overshoot) ──
+                # ─── Adaptive Software Smoothing (Anti-Jiggle Peak) ──
                 if ema_alpha < 1.0 and ema_alpha > 0.0:
-                    mx *= ema_alpha
-                    my *= ema_alpha
+                    # Calcola quanto velocemente si sta muovendo il bersaglio
+                    # Usa pred_prev_vx/vy (sempre definite, inizializzate a 0.0)
+                    # invece di vx/vy che esistono solo nel ramo else della predizione
+                    target_speed = _hypot(pred_prev_vx, pred_prev_vy) if not disable_prediction else 0.0
+                    
+                    # sensitivity_boost: quanto il bot reagisce ai movimenti bruschi
+                    sensitivity_boost = 0.015
+                    
+                    # Alpha dinamico: parte dal base (0.20) e sale con la velocità
+                    dynamic_alpha = ema_alpha + (target_speed * sensitivity_boost)
+                    
+                    # Clamp: non superare mai 0.99 per evitare snap robotici
+                    dynamic_alpha = _min(0.99, dynamic_alpha)
+                    
+                    mx *= dynamic_alpha
+                    my *= dynamic_alpha
 
 
                 # ─── ADS multiplier (right mouse = scoped) ────
