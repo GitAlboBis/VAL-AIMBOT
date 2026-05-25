@@ -10,9 +10,9 @@ ai_engine:
   - 1
 aim:
 
-  deadzone_px: 1.0
+  deadzone_px: 3.0
   enable: true
-  fov_radius_px: 80.0
+  fov_radius_px: 100.0
   pre_multiplier_x: 1.0
   pre_multiplier_y: 1.0
   trace_algorithm: 0
@@ -20,14 +20,14 @@ aim:
   cx_counts_per_2pi: 1657.8639905405767  # calibrated by tools/calibrate_cx.py
   lock_radius_px: 120.0
   lock_timeout_s: 1.0
-  ema_alpha: 0.20
+  ema_alpha: 0.25
   disable_prediction: false
   prediction_interval: 1.0
   autofire_enabled: false
   autofire_tolerance_px: 10.0
   autofire_cooldown_s: 0.15
 
-  ads_multiplier: 0.4
+  ads_multiplier: 0.8  # ratio = ADS_sens / hipfire_sens = 0.4 / 0.5
 capture:
   backend: capture_card
   chipset_preset: ms2130

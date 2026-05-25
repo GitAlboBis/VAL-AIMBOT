@@ -474,7 +474,7 @@ def main() -> int:
                 dx_px -= inflight_x
                 dy_px -= inflight_y
 
-                # ─── Predizione Cinematica (Derivata Pura) ──────────
+                # ─── Predizione Cinematica (Stabilizzata) ──────────
                 if not disable_prediction:
                     dt = 0.016 if pred_prev_time is None else min(current_t - pred_prev_time, 0.1)
                     
@@ -485,31 +485,35 @@ def main() -> int:
                         pred_prev_x = dx_px
                         pred_prev_y = dy_px
                     else:
-                        # Grazie allo Smith Predictor, dx_px è già "pulito" dai tuoi movimenti del mouse.
-                        # La sua variazione è quindi la VERA velocità del bersaglio!
+                        # Derivata dell'errore → stima velocità bersaglio
                         vx = (dx_px - pred_prev_x) / dt
                         vy = (dy_px - pred_prev_y) / dt
                         
-                        # Filtro EMA leggero SOLO sulla velocità per assorbire i micro-tremolii di YOLO
-                        pred_prev_vx = pred_prev_vx * 0.7 + vx * 0.3
-                        pred_prev_vy = pred_prev_vy * 0.7 + vy * 0.3
+                        # Filtro EMA pesante sulla velocità (0.85/0.15):
+                        # converge in ~6 frame ma assorbe il rumore YOLO,
+                        # evitando che fluttuazioni di 2-3px creino spike di velocità.
+                        pred_prev_vx = pred_prev_vx * 0.85 + vx * 0.15
+                        pred_prev_vy = pred_prev_vy * 0.85 + vy * 0.15
                         
-                        # Applica l'anticipo (prediction_interval funge da moltiplicatore)
-                        dx_px += pred_prev_vx * (prediction_interval * 0.05)
-                        dy_px += pred_prev_vy * (prediction_interval * 0.05)
+                        # Salva posizione PRIMA della predizione — evita che
+                        # l'anticipo del frame precedente contamini la derivata.
+                        pred_prev_x = dx_px
+                        pred_prev_y = dy_px
                         
-                    # Salva lo stato per il frame successivo
-                    pred_prev_x = dx_px
-                    pred_prev_y = dy_px
+                        # Look-ahead 25ms (1.5 frame) — anticipazione sufficiente
+                        # per i jiggle peek senza creare oscillazioni.
+                        dx_px += pred_prev_vx * (prediction_interval * 0.025)
+                        dy_px += pred_prev_vy * (prediction_interval * 0.025)
+                    
                     pred_prev_time = current_t
                 else:
                     pred_prev_time = None
                 
                 # ─── Hybrid Deadzone ──
-                # Mantiene la deadzone minima per il rumore termico di YOLO (1 pixel base)
-                # Ma impedisce che diventi così grande da ingoiare i movimenti sui target vicini.
-                # Tetto massimo imposto a 4 pixel per non perdere mai il tracking nei jiggle.
-                dynamic_deadzone = _min(4.0, _max(deadzone_px, best.h * 0.03))
+                # Assorbe il rumore YOLO (2-3px) amplificato dalla predizione (~5px).
+                # Floor = deadzone_px (3.0), scala con best.h × 0.05,
+                # cap a 8px per non ingoiare i jiggle peek (tipicamente >10px).
+                dynamic_deadzone = _min(8.0, _max(deadzone_px, best.h * 0.05))
 
                 if _hypot(dx_px, dy_px) < dynamic_deadzone:
                     continue
@@ -522,27 +526,25 @@ def main() -> int:
                 mx = yaw_rad * _counts_per_rad
                 my = pitch_rad * _counts_per_rad
 
-                # ─── Adaptive Software Smoothing (Anti-Jiggle Peak) ──
+                # ─── Software Smoothing ──────────────────────────
                 if ema_alpha < 1.0 and ema_alpha > 0.0:
-                    # Calcola quanto velocemente si sta muovendo il bersaglio
-                    # Usa pred_prev_vx/vy (sempre definite, inizializzate a 0.0)
-                    # invece di vx/vy che esistono solo nel ramo else della predizione
-                    target_speed = _hypot(pred_prev_vx, pred_prev_vy) if not disable_prediction else 0.0
-                    
-                    # sensitivity_boost: quanto il bot reagisce ai movimenti bruschi
-                    sensitivity_boost = 0.015
-                    
-                    # Alpha dinamico: parte dal base (0.20) e sale con la velocità
-                    dynamic_alpha = ema_alpha + (target_speed * sensitivity_boost)
-                    
-                    # Clamp: non superare mai 0.99 per evitare snap robotici
-                    dynamic_alpha = _min(0.99, dynamic_alpha)
-                    
-                    mx *= dynamic_alpha
-                    my *= dynamic_alpha
+                    mx *= ema_alpha
+                    my *= ema_alpha
 
+                # ─── Max step clamp (limita velocità VISIVA) ──
+                # Applicato PRIMA dell'ADS: limita i counts "hipfire-equivalenti".
+                # Così hipfire e ADS hanno la STESSA velocità visiva massima.
+                _max_move = _min(50.0, _max(15.0, best.h * 0.4))
+                _mag = _hypot(mx, my)
+                if _mag > _max_move:
+                    _scale = _max_move / _mag
+                    mx *= _scale
+                    my *= _scale
 
                 # ─── ADS multiplier (right mouse = scoped) ────
+                # DOPO il clamp: converte da counts hipfire a counts fisici ADS.
+                # Il gioco riduce la sensibilità di ads_multiplier, quindi serve
+                # mandare 1/ads_multiplier volte più counts per lo stesso risultato.
                 is_ads = False
                 if ads_multiplier != 1.0:
                     try:
