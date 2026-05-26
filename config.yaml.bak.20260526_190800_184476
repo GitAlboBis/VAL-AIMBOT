@@ -1,6 +1,6 @@
 ai_engine:
   capture_size: 416
-  confidence: 0.45
+  confidence: 0.37
   enabled: true
   execution_provider: auto
   headshot_bias: 0.40
@@ -20,9 +20,9 @@ aim:
   cx_counts_per_2pi: 1657.8639905405767  # calibrated by tools/calibrate_cx.py
   lock_radius_px: 120.0
   lock_timeout_s: 1.0
-  ema_alpha: 0.35 # base gain — adaptive curve reduces for flicks. Safe: 0.20-0.40
+  ema_alpha: 0.50
   disable_prediction: true
-  prediction_interval: 1.2
+  prediction_interval: 1.0
   autofire_enabled: false
   autofire_tolerance_px: 10.0
   autofire_cooldown_s: 0.15

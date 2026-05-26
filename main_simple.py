@@ -125,6 +125,52 @@ def _is_active(spec: ActivationSpec, driver: KmBoxNetDriver) -> bool:
 
 
 
+# ─── One Euro Filter (detection jitter suppression + velocity) ────────
+class OneEuroFilter:
+    """Jitter filter with built-in velocity estimation.
+
+    The smoothed derivative ``dx_hat`` (px/s) is computed as part of the
+    adaptive-cutoff algorithm.  Exposing it via the ``velocity`` property
+    lets the kinematic predictor reuse it directly — no separate EMA
+    needed.
+    """
+    def __init__(self, min_cutoff=1.0, beta=0.007, d_cutoff=1.0):
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.x_prev = None
+        self.dx_prev = 0.0
+        self.t_prev = None
+
+    @property
+    def velocity(self) -> float:
+        """Smoothed velocity (px/s) from the last filter update."""
+        return self.dx_prev
+
+    def _alpha(self, cutoff, dt):
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def __call__(self, x, t):
+        if self.t_prev is None:
+            self.x_prev = x
+            self.t_prev = t
+            return x
+        dt = t - self.t_prev
+        if dt <= 0:
+            return self.x_prev
+        a_d = self._alpha(self.d_cutoff, dt)
+        dx = (x - self.x_prev) / dt
+        dx_hat = a_d * dx + (1.0 - a_d) * self.dx_prev
+        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
+        a = self._alpha(cutoff, dt)
+        x_hat = a * x + (1.0 - a) * self.x_prev
+        self.x_prev = x_hat
+        self.dx_prev = dx_hat
+        self.t_prev = t
+        return x_hat
+
+
 # ─── Module-level selector cache (Requirement 2.2 / §4.1 (b)) ─────────
 last_mid_coord: Optional[Tuple[float, float]] = None
 last_target_time: float = 0.0
@@ -167,27 +213,15 @@ class MouseWorker:
             pass  # Worker is busy; this frame's command is dropped.
 
     def _worker_loop(self) -> None:
-        steps = 5
-        sleep_time = 0.002  # 2ms tra ogni micro-step (totale 10ms)
-        
         while not self._stop.is_set():
             try:
                 mx, my = self._queue.get(timeout=0.05)
             except queue.Empty:
                 continue
-            
-            step_x = mx / steps
-            step_y = my / steps
-            
             try:
-                for _ in range(steps):
-                    self._driver.move(step_x, step_y)
-                    # Busy-wait precisissimo al microsecondo invece di time.sleep()
-                    target_t = time.perf_counter() + sleep_time
-                    while time.perf_counter() < target_t:
-                        pass 
+                self._driver.move(mx, my)
             except Exception:
-                pass  # Driver errors are already logged internally.
+                pass
 
     def stop(self) -> None:
         self._stop.set()
@@ -322,8 +356,6 @@ def main() -> int:
     last_mid_coord = None
     last_target_time = 0.0
 
-    pred_prev_time: Optional[float] = None
-
     if not args.silent:
         print("Running.")
 
@@ -354,13 +386,12 @@ def main() -> int:
     _dbg_t0 = time.time()
 
 
-    pred_prev_vx = 0.0
-    pred_prev_vy = 0.0
+    last_shot_time = 0.0
+    pred_prev_time: Optional[float] = None
     pred_prev_x = 0.0
     pred_prev_y = 0.0
-    last_shot_time = 0.0
-    inflight_history = []
-    capture_latency = 0.035  # 35ms di latenza stimata (Capture Card + Kmbox + Monitor)
+    pred_prev_vx = 0.0
+    pred_prev_vy = 0.0
 
     try:
         while True:
@@ -396,7 +427,7 @@ def main() -> int:
             if not detections:
                 if now_t - last_target_time > lock_timeout_s:
                     last_mid_coord = None
-                    # Reset prediction & EMA when target is fully lost
+                    # Reset state when target is fully lost
                     pred_prev_time = None
 
             else:
@@ -462,61 +493,46 @@ def main() -> int:
                             threading.Thread(target=_shoot, daemon=True).start()
                             last_shot_time = current_t
 
-                # ─── Smith Predictor (Compensazione Latenza In-Flight) ──────────
-                # Rimuove dalla cronologia i movimenti vecchi (già visibili a schermo)
-                inflight_history = [(t, px, py) for (t, px, py) in inflight_history if current_t - t < capture_latency]
-                
-                # Calcola quanti pixel "in volo" non sono ancora stati registrati da YOLO
-                inflight_x = sum(px for (t, px, py) in inflight_history)
-                inflight_y = sum(py for (t, px, py) in inflight_history)
-                
-                # Sottrae il movimento in volo dalla distanza reale per evitare overshoot (scatti sballati)
-                dx_px -= inflight_x
-                dy_px -= inflight_y
 
-                # ─── Predizione Cinematica (Stabilizzata) ──────────
-                if not disable_prediction:
-                    dt = 0.016 if pred_prev_time is None else min(current_t - pred_prev_time, 0.1)
-                    
-                    if not has_lock or pred_prev_time is None:
-                        # Reset della velocità se abbiamo appena agganciato
-                        pred_prev_vx = 0.0
-                        pred_prev_vy = 0.0
-                        pred_prev_x = dx_px
-                        pred_prev_y = dy_px
-                    else:
-                        # Derivata dell'errore → stima velocità bersaglio
-                        vx = (dx_px - pred_prev_x) / dt
-                        vy = (dy_px - pred_prev_y) / dt
-                        
-                        # Filtro EMA pesante sulla velocità (0.85/0.15):
-                        # converge in ~6 frame ma assorbe il rumore YOLO,
-                        # evitando che fluttuazioni di 2-3px creino spike di velocità.
-                        pred_prev_vx = pred_prev_vx * 0.85 + vx * 0.15
-                        pred_prev_vy = pred_prev_vy * 0.85 + vy * 0.15
-                        
-                        # Salva posizione PRIMA della predizione — evita che
-                        # l'anticipo del frame precedente contamini la derivata.
-                        pred_prev_x = dx_px
-                        pred_prev_y = dy_px
-                        
-                        # Look-ahead 25ms (1.5 frame) — anticipazione sufficiente
-                        # per i jiggle peek senza creare oscillazioni.
-                        dx_px += pred_prev_vx * (prediction_interval * 0.025)
-                        dy_px += pred_prev_vy * (prediction_interval * 0.025)
-                    
+                # ─── Lightweight Prediction (raw position velocity) ──
+                # Tracks target movement between frames to anticipate
+                # where a strafing target will be.  Very conservative:
+                # heavy EMA + small look-ahead to avoid re-introducing
+                # the orbit that the old OEF prediction caused.
+                if not disable_prediction and has_lock:
+                    if pred_prev_time is not None:
+                        dt = current_t - pred_prev_time
+                        if 0 < dt < 0.1:
+                            vx = (hx - pred_prev_x) / dt
+                            vy = (hy - pred_prev_y) / dt
+                            pred_prev_vx = pred_prev_vx * 0.85 + vx * 0.15
+                            pred_prev_vy = pred_prev_vy * 0.85 + vy * 0.15
+                            v_mag = _hypot(pred_prev_vx, pred_prev_vy)
+                            if v_mag > 50.0:  # ignore jitter below 50 px/s
+                                if v_mag > 400.0:  # cap to prevent runaway
+                                    v_scale = 400.0 / v_mag
+                                    pred_prev_vx *= v_scale
+                                    pred_prev_vy *= v_scale
+                                dx_px += pred_prev_vx * (prediction_interval * 0.008)
+                                dy_px += pred_prev_vy * (prediction_interval * 0.008)
+                    pred_prev_x = hx
+                    pred_prev_y = hy
                     pred_prev_time = current_t
                 else:
-                    pred_prev_time = None
-                
-                # ─── Hybrid Deadzone ──
-                # Assorbe il rumore YOLO (2-3px) amplificato dalla predizione (~5px).
-                # Floor = deadzone_px (3.0), scala con best.h × 0.05,
-                # cap a 8px per non ingoiare i jiggle peek (tipicamente >10px).
+                    pred_prev_vx = 0.0
+                    pred_prev_vy = 0.0
+                    pred_prev_x = hx
+                    pred_prev_y = hy
+                    pred_prev_time = current_t                
+                # ─── Proportional Deadzone (no limit cycle) ──
                 dynamic_deadzone = _min(8.0, _max(deadzone_px, best.h * 0.05))
-
-                if _hypot(dx_px, dy_px) < dynamic_deadzone:
+                dist_to_target = _hypot(dx_px, dy_px)
+                if dist_to_target < 0.5:
                     continue
+                if dist_to_target < dynamic_deadzone:
+                    ramp = dist_to_target / dynamic_deadzone
+                    dx_px *= ramp
+                    dy_px *= ramp
 
                 # ─── Inline FOV conversion (avoid function call overhead) ──
                 dx_pre = dx_px * pre_x
@@ -526,20 +542,19 @@ def main() -> int:
                 mx = yaw_rad * _counts_per_rad
                 my = pitch_rad * _counts_per_rad
 
-                # ─── Software Smoothing ──────────────────────────
-                if ema_alpha < 1.0 and ema_alpha > 0.0:
-                    mx *= ema_alpha
-                    my *= ema_alpha
-
-                # ─── Max step clamp (limita velocità VISIVA) ──
-                # Applicato PRIMA dell'ADS: limita i counts "hipfire-equivalenti".
-                # Così hipfire e ADS hanno la STESSA velocità visiva massima.
-                _max_move = _min(50.0, _max(15.0, best.h * 0.4))
-                _mag = _hypot(mx, my)
-                if _mag > _max_move:
-                    _scale = _max_move / _mag
-                    mx *= _scale
-                    my *= _scale
+                # ─── Latency-Adaptive Gain ────────────────────────────
+                # The dual-PC pipeline has ~5 frames of feedback latency.
+                # Base gain = ema_alpha (0.25).  For large errors (flick),
+                # reduce gain to prevent overshoot over the latency window.
+                # For small errors (tracking), keep gain high for snap.
+                # gain = ema_alpha × (0.5 + 0.5 × 30/(dist+30))
+                #   dist=5:   gain ≈ 0.93 × ema_alpha  (snappy tracking)
+                #   dist=45:  gain ≈ 0.70 × ema_alpha  (stable convergence)
+                #   dist=200: gain ≈ 0.57 × ema_alpha  (no flick overshoot)
+                _dist_counts = _hypot(mx, my)
+                _adaptive = 0.5 + 0.5 * 30.0 / (_dist_counts + 30.0)
+                mx *= ema_alpha * _adaptive
+                my *= ema_alpha * _adaptive
 
                 # ─── ADS multiplier (right mouse = scoped) ────
                 # DOPO il clamp: converte da counts hipfire a counts fisici ADS.
@@ -555,27 +570,14 @@ def main() -> int:
                     except Exception:  # noqa: BLE001
                         pass
 
-                # Invio al MouseWorker per l'Interpolazione Software
+                # Send to MouseWorker
                 if abs(mx) > 0.01 or abs(my) > 0.01:
                     mouse_worker.queue_move(mx, my)
                     _dbg_moves += 1
 
-                    # Registra il movimento appena inviato nella memoria In-Flight
-                    # Se siamo in ADS, il gioco riduce la sensibilità, quindi abbiamo dovuto inviare un `mx` gonfiato.
-                    # Ma per calcolare quanti pixel a schermo ci siamo mossi realmente, dobbiamo sgonfiarlo!
-                    record_mx = mx * ads_multiplier if is_ads else mx
-                    record_my = my * ads_multiplier if is_ads else my
-
-                    yaw_moved = record_mx / _counts_per_rad
-                    pitch_moved = record_my / _counts_per_rad
-                    moved_px = (math.tan(yaw_moved) * _focal_length_px) / pre_x
-                    moved_py = (math.tan(pitch_moved) * _focal_length_px) / pre_y
-                    
-                    inflight_history.append((current_t, moved_px, moved_py))
-
             # ─── Debug status print (1 Hz) ─────────────────────────
             if time.time() - _dbg_t0 >= 1.0:
-                print(f"\r[fps={_dbg_fps:3d}  dets={_dbg_dets:3d}  aim={'ON ' if aim_active else 'OFF'}  moves={_dbg_moves:3d}  best={'YES' if best else 'NO '}]    ", end="", flush=True)
+                print(f"\r[fps={_dbg_fps:3d} dets={_dbg_dets:3d} aim={'ON ' if aim_active else 'OFF'} moves={_dbg_moves:3d}]    ", end="", flush=True)
                 _dbg_fps = _dbg_dets = _dbg_moves = _dbg_aim_on = 0
                 _dbg_t0 = time.time()
 
